@@ -7,6 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(KAIRO_PHYSICS_ENGINE_BUILD_TESTS "Build KairoPhysicsEngine tests" ${PROJECT_IS_TOP_LEVEL})
 option(KAIRO_PHYSICS_ENGINE_BUILD_SANDBOX "Build terminal KairoPhysicsEngine sandbox" ${PROJECT_IS_TOP_LEVEL})
+option(KAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX "Build GLFW KairoPhysicsEngine debug sandbox when GLFW is available" ${PROJECT_IS_TOP_LEVEL})
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     add_compile_options(-Wall -Wextra -Wno-unused-parameter)
@@ -17,6 +18,18 @@ endif()
 if(KAIRO_PHYSICS_ENGINE_BUILD_SANDBOX)
     add_executable(KairoPhysicsSandbox sandbox/KairoPhysicsSandbox.cpp)
     target_link_libraries(KairoPhysicsSandbox PRIVATE KairoPhysicsEngine)
+endif()
+
+if(KAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX)
+    find_package(glfw3 QUIET)
+    find_package(OpenGL QUIET)
+
+    if(glfw3_FOUND AND OpenGL_FOUND)
+        add_executable(KairoPhysicsGlfwSandbox sandbox/KairoPhysicsGlfwSandbox.cpp)
+        target_link_libraries(KairoPhysicsGlfwSandbox PRIVATE KairoPhysicsEngine glfw OpenGL::GL)
+    else()
+        message(STATUS "KairoPhysicsGlfwSandbox skipped: GLFW or OpenGL not found.")
+    endif()
 endif()
 
 if(NOT TARGET KairoPhysicsMath)
