@@ -4,11 +4,14 @@ module;
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
+#include <string>
+#include <utility>
 #include <vector>
 
 export module Kairo.Foundation.PhysicsEngine.World;
 
 import Kairo.Foundation.Math.Vector;
+import Kairo.Foundation.Geometry.AABB;
 import Kairo.Foundation.PhysicsMath;
 import Kairo.Foundation.PhysicsEngine.Types;
 import Kairo.Foundation.PhysicsEngine.Material;
@@ -22,6 +25,24 @@ import Kairo.Foundation.PhysicsEngine.Debug;
 export namespace kairo::foundation::physics
 {
     using namespace kairo::foundation::math;
+    using namespace kairo::foundation::geometry;
+
+    enum class PhysicsContactEventType : std::uint8_t
+    {
+        Begin,
+        Stay,
+        End
+    };
+
+    struct PhysicsContactEvent final
+    {
+        BodyID BodyA = InvalidBodyID;
+        BodyID BodyB = InvalidBodyID;
+        ColliderID ColliderA = InvalidColliderID;
+        ColliderID ColliderB = InvalidColliderID;
+        bool IsTrigger = false;
+        PhysicsContactEventType Type = PhysicsContactEventType::Begin;
+    };
 
     class PhysicsWorld final
     {
@@ -198,6 +219,66 @@ export namespace kairo::foundation::physics
             WakeRigidBody(m_Bodies.at(body));
         }
 
+        void AddBodyForce(
+            BodyID body,
+            const Vec3f& force)
+        {
+            RigidBody& record =
+                RequireMutableBody(body, "AddBodyForce");
+
+            WakeRigidBody(record);
+            kairo::foundation::physics::AddForce(record.Forces, force);
+        }
+
+        void AddBodyTorque(
+            BodyID body,
+            const Vec3f& torque)
+        {
+            RigidBody& record =
+                RequireMutableBody(body, "AddBodyTorque");
+
+            WakeRigidBody(record);
+            kairo::foundation::physics::AddTorque(record.Forces, torque);
+        }
+
+        void AddBodyForceAtPoint(
+            BodyID body,
+            const Vec3f& force,
+            const Vec3f& worldPoint)
+        {
+            RigidBody& record =
+                RequireMutableBody(body, "AddBodyForceAtPoint");
+
+            WakeRigidBody(record);
+            kairo::foundation::physics::AddForceAtPoint(
+                record.Forces,
+                force,
+                worldPoint,
+                record.State.Position);
+        }
+
+        void ApplyBodyImpulseAtPoint(
+            BodyID body,
+            const Vec3f& impulse,
+            const Vec3f& worldPoint)
+        {
+            RigidBody& record =
+                RequireMutableBody(body, "ApplyBodyImpulseAtPoint");
+
+            if (!IsDynamicBodyType(record))
+            {
+                return;
+            }
+
+            WakeRigidBody(record);
+            ApplyImpulseAtPoint(
+                record.State,
+                record.Mass.InverseMass,
+                WorldInverseInertia(record),
+                impulse,
+                worldPoint);
+        }
+
         void Step(
             float dt)
         {
@@ -214,6 +295,7 @@ export namespace kairo::foundation::physics
             m_LastContacts =
                 ComputeContacts(m_Bodies, m_Colliders, m_LastPairs);
 
+            UpdateContactEvents();
             WakeContactBodies();
             RestoreContactCache();
             WarmStartContacts(m_Bodies, m_Colliders, m_LastContacts);
@@ -308,6 +390,12 @@ export namespace kairo::foundation::physics
         }
 
         [[nodiscard]]
+        const std::vector<PhysicsContactEvent>& ContactEvents() const noexcept
+        {
+            return m_LastEvents;
+        }
+
+        [[nodiscard]]
         const std::vector<BroadphasePair>& BroadphasePairs() const noexcept
         {
             return m_LastPairs;
@@ -325,13 +413,80 @@ export namespace kairo::foundation::physics
             return CollectDebugContacts(m_LastContacts);
         }
 
+        [[nodiscard]]
+        std::vector<ColliderID> QueryAABB(
+            const AABBf& query,
+            std::uint32_t layerMask = 0xFFFF'FFFFu) const
+        {
+            std::vector<ColliderID> result;
+            for (const Collider& collider : m_Colliders)
+            {
+                if (!IsValidCollider(collider.ID) ||
+                    IsInfiniteCollider(collider) ||
+                    (BroadphaseCategoryMask(collider) & layerMask) == 0u)
+                {
+                    continue;
+                }
+
+                if (Intersects(WorldAABB(m_Bodies.at(collider.Body), collider), query))
+                {
+                    result.push_back(collider.ID);
+                }
+            }
+
+            return result;
+        }
+
+        [[nodiscard]]
+        std::vector<ColliderID> QuerySphere(
+            const Vec3f& center,
+            float radius,
+            std::uint32_t layerMask = 0xFFFF'FFFFu) const
+        {
+            RequireFinite(center, "QuerySphere.center");
+            RequirePositive(radius, "QuerySphere.radius");
+
+            std::vector<ColliderID> result;
+            const float radiusSq =
+                radius * radius;
+
+            for (const Collider& collider : m_Colliders)
+            {
+                if (!IsValidCollider(collider.ID) ||
+                    IsInfiniteCollider(collider) ||
+                    (BroadphaseCategoryMask(collider) & layerMask) == 0u)
+                {
+                    continue;
+                }
+
+                if (WorldAABB(m_Bodies.at(collider.Body), collider).DistanceSquaredToPoint(center) <= radiusSq)
+                {
+                    result.push_back(collider.ID);
+                }
+            }
+
+            return result;
+        }
+
     private:
         std::vector<RigidBody> m_Bodies;
         std::vector<Collider> m_Colliders;
         BroadphaseWorld m_Broadphase;
         std::vector<BroadphasePair> m_LastPairs;
         std::vector<ContactManifold> m_LastContacts;
+        std::vector<PhysicsContactEvent> m_LastEvents;
         float m_FixedAccumulator = 0.0f;
+
+        struct ContactEventKey final
+        {
+            BodyID BodyA = InvalidBodyID;
+            BodyID BodyB = InvalidBodyID;
+            ColliderID ColliderA = InvalidColliderID;
+            ColliderID ColliderB = InvalidColliderID;
+            bool IsTrigger = false;
+        };
+
+        std::vector<ContactEventKey> m_PreviousContactKeys;
 
         struct ContactCacheEntry final
         {
@@ -409,6 +564,152 @@ export namespace kairo::foundation::physics
             {
                 ClearForces(body.Forces);
             }
+        }
+
+        RigidBody& RequireMutableBody(
+            BodyID body,
+            const char* operation)
+        {
+            if (!IsValidBody(body))
+            {
+                throw std::out_of_range(
+                    std::string(operation) +
+                    " failed: body id does not exist or is inactive.");
+            }
+
+            return m_Bodies.at(body);
+        }
+
+        [[nodiscard]]
+        static ContactEventKey MakeContactEventKey(
+            const ContactManifold& manifold) noexcept
+        {
+            return
+            {
+                manifold.BodyA,
+                manifold.BodyB,
+                manifold.ColliderA,
+                manifold.ColliderB,
+                manifold.IsTrigger
+            };
+        }
+
+        [[nodiscard]]
+        static bool SameContactEventKey(
+            const ContactEventKey& lhs,
+            const ContactEventKey& rhs) noexcept
+        {
+            return lhs.BodyA == rhs.BodyA &&
+                lhs.BodyB == rhs.BodyB &&
+                lhs.ColliderA == rhs.ColliderA &&
+                lhs.ColliderB == rhs.ColliderB &&
+                lhs.IsTrigger == rhs.IsTrigger;
+        }
+
+        [[nodiscard]]
+        static bool LessContactEventKey(
+            const ContactEventKey& lhs,
+            const ContactEventKey& rhs) noexcept
+        {
+            if (lhs.BodyA != rhs.BodyA)
+            {
+                return lhs.BodyA < rhs.BodyA;
+            }
+            if (lhs.BodyB != rhs.BodyB)
+            {
+                return lhs.BodyB < rhs.BodyB;
+            }
+            if (lhs.ColliderA != rhs.ColliderA)
+            {
+                return lhs.ColliderA < rhs.ColliderA;
+            }
+            if (lhs.ColliderB != rhs.ColliderB)
+            {
+                return lhs.ColliderB < rhs.ColliderB;
+            }
+            return lhs.IsTrigger < rhs.IsTrigger;
+        }
+
+        [[nodiscard]]
+        static PhysicsContactEvent MakeContactEvent(
+            const ContactEventKey& key,
+            PhysicsContactEventType type) noexcept
+        {
+            return
+            {
+                key.BodyA,
+                key.BodyB,
+                key.ColliderA,
+                key.ColliderB,
+                key.IsTrigger,
+                type
+            };
+        }
+
+        void UpdateContactEvents()
+        {
+            std::vector<ContactEventKey> current;
+            for (const ContactManifold& manifold : m_LastContacts)
+            {
+                current.push_back(MakeContactEventKey(manifold));
+            }
+
+            std::sort(current.begin(), current.end(), LessContactEventKey);
+            current.erase(
+                std::unique(
+                    current.begin(),
+                    current.end(),
+                    SameContactEventKey),
+                current.end());
+
+            m_LastEvents.clear();
+
+            for (const ContactEventKey& key : current)
+            {
+                const bool existed =
+                    std::find_if(
+                        m_PreviousContactKeys.begin(),
+                        m_PreviousContactKeys.end(),
+                        [&key](const ContactEventKey& previous)
+                        {
+                            return SameContactEventKey(key, previous);
+                        }) != m_PreviousContactKeys.end();
+
+                m_LastEvents.push_back(
+                    MakeContactEvent(
+                        key,
+                        existed ? PhysicsContactEventType::Stay : PhysicsContactEventType::Begin));
+            }
+
+            for (const ContactEventKey& previous : m_PreviousContactKeys)
+            {
+                const bool stillExists =
+                    std::find_if(
+                        current.begin(),
+                        current.end(),
+                        [&previous](const ContactEventKey& key)
+                        {
+                            return SameContactEventKey(key, previous);
+                        }) != current.end();
+
+                if (!stillExists)
+                {
+                    m_LastEvents.push_back(
+                        MakeContactEvent(previous, PhysicsContactEventType::End));
+                }
+            }
+
+            std::sort(
+                m_LastEvents.begin(),
+                m_LastEvents.end(),
+                [](const PhysicsContactEvent& lhs, const PhysicsContactEvent& rhs)
+                {
+                    return LessContactEventKey(
+                        ContactEventKey{ lhs.BodyA, lhs.BodyB, lhs.ColliderA, lhs.ColliderB, lhs.IsTrigger },
+                        ContactEventKey{ rhs.BodyA, rhs.BodyB, rhs.ColliderA, rhs.ColliderB, rhs.IsTrigger });
+                });
+
+            m_PreviousContactKeys = std::move(current);
         }
 
         static void AdvanceMotionState(
@@ -589,6 +890,28 @@ export namespace kairo::foundation::physics
                             entry.ColliderB == collider;
                     }),
                 m_ContactCache.end());
+
+            m_PreviousContactKeys.erase(
+                std::remove_if(
+                    m_PreviousContactKeys.begin(),
+                    m_PreviousContactKeys.end(),
+                    [collider](const ContactEventKey& entry)
+                    {
+                        return entry.ColliderA == collider ||
+                            entry.ColliderB == collider;
+                    }),
+                m_PreviousContactKeys.end());
+
+            m_LastEvents.erase(
+                std::remove_if(
+                    m_LastEvents.begin(),
+                    m_LastEvents.end(),
+                    [collider](const PhysicsContactEvent& event)
+                    {
+                        return event.ColliderA == collider ||
+                            event.ColliderB == collider;
+                    }),
+                m_LastEvents.end());
         }
 
         void RemoveCachedContactsForBody(
@@ -615,6 +938,28 @@ export namespace kairo::foundation::physics
                             entry.BodyB == body;
                     }),
                 m_ContactCache.end());
+
+            m_PreviousContactKeys.erase(
+                std::remove_if(
+                    m_PreviousContactKeys.begin(),
+                    m_PreviousContactKeys.end(),
+                    [body](const ContactEventKey& entry)
+                    {
+                        return entry.BodyA == body ||
+                            entry.BodyB == body;
+                    }),
+                m_PreviousContactKeys.end());
+
+            m_LastEvents.erase(
+                std::remove_if(
+                    m_LastEvents.begin(),
+                    m_LastEvents.end(),
+                    [body](const PhysicsContactEvent& event)
+                    {
+                        return event.BodyA == body ||
+                            event.BodyB == body;
+                    }),
+                m_LastEvents.end());
         }
 
         [[nodiscard]]

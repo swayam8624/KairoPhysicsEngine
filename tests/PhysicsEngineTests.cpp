@@ -3,6 +3,7 @@
 
 import Kairo.Foundation.PhysicsEngine;
 import Kairo.Foundation.PhysicsMath;
+import Kairo.Foundation.Geometry.AABB;
 import Kairo.Foundation.Math.Quaternion;
 import Kairo.Foundation.Math.Vector;
 
@@ -420,6 +421,99 @@ TEST_CASE("Sleeping bodies stop integrating and wake on force", "[PhysicsEngine]
 
     REQUIRE(!world.Bodies()[body].Sleeping);
     REQUIRE(world.Bodies()[body].State.LinearVelocity.x > 0.0f);
+}
+
+TEST_CASE("World force and impulse APIs mutate dynamic bodies", "[PhysicsEngine][World]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    RigidBodyDesc desc =
+        DynamicSphereBody(Vec3f::Zero());
+
+    desc.EnableGravity = false;
+
+    const BodyID body =
+        world.CreateRigidBody(desc);
+
+    world.AddBodyForceAtPoint(
+        body,
+        Vec3f{ 0.0f, 10.0f, 0.0f },
+        Vec3f{ 1.0f, 0.0f, 0.0f });
+
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.Bodies()[body].State.AngularVelocity.z > 0.0f);
+
+    world.ApplyBodyImpulseAtPoint(
+        body,
+        Vec3f{ 1.0f, 0.0f, 0.0f },
+        Vec3f::Zero());
+
+    REQUIRE(world.Bodies()[body].State.LinearVelocity.x > 0.0f);
+    REQUIRE_THROWS_AS(world.AddBodyForce(99, Vec3f::UnitX()), std::out_of_range);
+}
+
+TEST_CASE("World overlap queries return active finite colliders", "[PhysicsEngine][World]")
+{
+    PhysicsWorld world;
+
+    const BodyID sphere =
+        world.CreateRigidBody(DynamicSphereBody(Vec3f{ 0.0f, 0.5f, 0.0f }));
+
+    const BodyID floor =
+        world.CreateRigidBody(StaticBody());
+
+    const ColliderID sphereCollider =
+        world.AddCollider(sphere, SphereCollider{ 0.5f });
+
+    [[maybe_unused]] const ColliderID planeCollider =
+        world.AddCollider(floor, PlaneCollider{ Vec3f::Up(), 0.0f });
+
+    const std::vector<ColliderID> aabbHits =
+        world.QueryAABB(AABBf::FromCenterExtent(Vec3f{ 0.0f, 0.5f, 0.0f }, Vec3f{ 1.0f, 1.0f, 1.0f }));
+
+    const std::vector<ColliderID> sphereHits =
+        world.QuerySphere(Vec3f{ 0.0f, 0.5f, 0.0f }, 1.0f);
+
+    REQUIRE(aabbHits.size() == 1);
+    REQUIRE(aabbHits[0] == sphereCollider);
+    REQUIRE(sphereHits.size() == 1);
+    REQUIRE(sphereHits[0] == sphereCollider);
+}
+
+TEST_CASE("World reports deterministic contact begin stay and end events", "[PhysicsEngine][World]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    const BodyID a =
+        world.CreateRigidBody(StaticBody(Vec3f::Zero()));
+
+    const BodyID b =
+        world.CreateRigidBody(StaticBody(Vec3f{ 0.75f, 0.0f, 0.0f }));
+
+    [[maybe_unused]] const ColliderID ca =
+        world.AddCollider(a, SphereCollider{ 0.5f });
+
+    [[maybe_unused]] const ColliderID cb =
+        world.AddCollider(b, SphereCollider{ 0.5f });
+
+    world.Step(1.0f / 60.0f);
+    REQUIRE(world.ContactEvents().size() == 1);
+    REQUIRE(world.ContactEvents()[0].Type == PhysicsContactEventType::Begin);
+
+    world.Step(1.0f / 60.0f);
+    REQUIRE(world.ContactEvents().size() == 1);
+    REQUIRE(world.ContactEvents()[0].Type == PhysicsContactEventType::Stay);
+
+    world.Bodies()[b].State.Position = Vec3f{ 4.0f, 0.0f, 0.0f };
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.ContactEvents().size() == 1);
+    REQUIRE(world.ContactEvents()[0].Type == PhysicsContactEventType::End);
 }
 
 TEST_CASE("Fixed timestep accumulator advances deterministic substeps", "[PhysicsEngine][World]")
