@@ -1,0 +1,5 @@
+scene sleeping-test
+description vertical box stack used to inspect sleep transitions
+steps 420
+dt 0.0166667
+sleeping enabled

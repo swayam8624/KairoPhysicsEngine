@@ -1,0 +1,4 @@
+scene sphere-collision
+description two dynamic spheres colliding head-on without gravity
+steps 180
+dt 0.0166667

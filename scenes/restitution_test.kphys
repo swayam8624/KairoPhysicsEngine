@@ -1,0 +1,4 @@
+scene restitution-test
+description four balls with increasing restitution values
+steps 240
+dt 0.0166667

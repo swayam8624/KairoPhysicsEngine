@@ -25,8 +25,32 @@ Run the terminal sandbox:
 
 ```bash
 ./build/KairoPhysicsSandbox falling-sphere
-./build/KairoPhysicsSandbox trigger
-./build/KairoPhysicsSandbox rotated-box
+./build/KairoPhysicsSandbox sphere-collision --steps 180 --every 30
+./build/KairoPhysicsSandbox box-stack --steps 240 --every 40
+./build/KairoPhysicsSandbox friction-ramp --steps 240 --every 40
+./build/KairoPhysicsSandbox restitution-test --steps 240 --every 40
+./build/KairoPhysicsSandbox sleeping-test --steps 420 --every 60
+./build/KairoPhysicsSandbox stress-100 --steps 180 --every 30 --csv outputs/stress_100.csv
+```
+
+Terminal scenarios:
+
+```text
+falling-sphere
+sphere-collision
+box-stack
+friction-ramp
+restitution-test
+sleeping-test
+stress-100
+stress-500
+```
+
+Terminal output includes frame stats, tracked body transforms/velocities, and
+an ASCII side-view. CSV output uses:
+
+```text
+frame,time,bodies,contacts,islands,awake,sleeping,step_ms,broadphase_ms,narrowphase_ms,solver_ms
 ```
 
 Run the GLFW debug sandbox when GLFW/OpenGL are available:
@@ -90,6 +114,7 @@ Runtime collision filter callback
 Synchronous Begin/Stay/End contact event callback
 Trigger/sensor contacts that report overlap without solver response
 Persistent KairoSpatial DynamicAABBTree broadphase
+Last-step profiling: total, broadphase, narrowphase, solver timings
 Plane pairing for infinite plane colliders
 Sphere-sphere, sphere-plane, sphere-box, AABB-AABB, AABB-plane, box-box SAT, and box-plane contacts
 Sequential impulse solver with warm-started normal/friction impulses
@@ -101,6 +126,7 @@ Overlap queries: QueryAABB and QuerySphere
 Physics rays: Raycast nearest hit and RaycastAll sorted hit list
 Renderer-agnostic debug contacts and AABBs
 Terminal and GLFW debug sandboxes
+Modular terminal sandbox core with scenarios, ASCII rendering, and CSV benchmark output
 Catch2 regression tests
 ```
 
@@ -116,6 +142,17 @@ Narrowphase          exact V1 contact generation and box SAT
 ContactSolver        warm-started sequential impulses and position correction
 PhysicsDebug         renderer-agnostic debug contacts and AABBs
 PhysicsWorld         ownership, fixed stepping, events, collision response rules, overlap/raycast queries, sandbox-facing API
+```
+
+Sandbox module map:
+
+```text
+SandboxTypes          scenario ids, run settings, tracked body metadata, frame stats
+DemoScene             reusable demo/stress scene construction
+TerminalRenderer      numeric logs, body rows, ASCII side-view, benchmark CSV
+PhysicsDebugRenderer  renderer-agnostic AABB/contact snapshot capture
+SandboxApp            CLI parsing and fixed-step terminal run loop
+KairoPhysicsSandbox   umbrella module for sandbox tooling
 ```
 
 Use the umbrella module:

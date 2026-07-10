@@ -15,11 +15,6 @@ elseif(MSVC)
     add_compile_options(/W4)
 endif()
 
-if(KAIRO_PHYSICS_ENGINE_BUILD_SANDBOX)
-    add_executable(KairoPhysicsSandbox sandbox/KairoPhysicsSandbox.cpp)
-    target_link_libraries(KairoPhysicsSandbox PRIVATE KairoPhysicsEngine)
-endif()
-
 if(KAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX)
     find_package(glfw3 QUIET)
     find_package(OpenGL QUIET)
@@ -88,6 +83,26 @@ target_sources(KairoPhysicsEngine
 )
 
 target_link_libraries(KairoPhysicsEngine PUBLIC KairoPhysicsMath KairoSpatial)
+
+if(KAIRO_PHYSICS_ENGINE_BUILD_SANDBOX)
+    add_library(KairoPhysicsSandboxCore)
+    target_sources(KairoPhysicsSandboxCore
+        PUBLIC
+            FILE_SET CXX_MODULES
+            BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/sandbox
+            FILES
+                sandbox/SandboxTypes.cppm
+                sandbox/DemoScene.cppm
+                sandbox/TerminalRenderer.cppm
+                sandbox/PhysicsDebugRenderer.cppm
+                sandbox/SandboxApp.cppm
+                sandbox/KairoPhysicsSandbox.cppm
+    )
+    target_link_libraries(KairoPhysicsSandboxCore PUBLIC KairoPhysicsEngine)
+
+    add_executable(KairoPhysicsSandbox sandbox/examples/main.cpp)
+    target_link_libraries(KairoPhysicsSandbox PRIVATE KairoPhysicsSandboxCore)
+endif()
 
 if(KAIRO_PHYSICS_ENGINE_BUILD_TESTS)
     include(FetchContent)

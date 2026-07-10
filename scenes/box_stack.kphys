@@ -1,0 +1,4 @@
+scene box-stack
+description axis-aligned box pyramid settling onto the floor
+steps 240
+dt 0.0166667
