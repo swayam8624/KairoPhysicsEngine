@@ -44,10 +44,10 @@ GLFW playground controls:
 Delete/Backspace  remove selected object
 C                 clear dynamic objects
 Tab               select next dynamic object
-`                 select previous dynamic object
+[                 select previous dynamic object
 Left click         select nearest dynamic object
-Arrows/WASD        push selected object with force
-Shift+Arrows/WASD  directly move selected object
+Arrows/WASD        gently push selected object with force
+Shift+Arrows/WASD  slowly direct-move selected object
 Q/E               apply torque to selected object
 Space             pause/resume
 N                 single fixed step while paused

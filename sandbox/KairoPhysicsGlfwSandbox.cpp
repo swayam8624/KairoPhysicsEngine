@@ -29,16 +29,37 @@ namespace
         3.14159265358979323846f;
 
     constexpr float ViewLeft =
-        -8.0f;
+        -9.5f;
 
     constexpr float ViewRight =
-        8.0f;
+        9.5f;
 
     constexpr float ViewBottom =
-        -1.0f;
+        -1.2f;
 
     constexpr float ViewTop =
-        8.0f;
+        8.8f;
+
+    constexpr float PlayLeft =
+        -8.35f;
+
+    constexpr float PlayRight =
+        8.35f;
+
+    constexpr float PlayBottom =
+        0.0f;
+
+    constexpr float PlayTop =
+        7.8f;
+
+    constexpr float PushAcceleration =
+        14.0f;
+
+    constexpr float DirectMoveSpeed =
+        2.15f;
+
+    constexpr float TorqueAcceleration =
+        3.2f;
 
     enum class ActorKind
     {
@@ -124,10 +145,10 @@ namespace
         desc.Type = BodyType::Dynamic;
         desc.State.Position = position;
         desc.Mass = SphereMassProperties(radius, 1.0f);
-        desc.LinearDamping = 0.04f;
-        desc.AngularDamping = 0.04f;
-        desc.MaxLinearSpeed = 35.0f;
-        desc.MaxAngularSpeed = 30.0f;
+        desc.LinearDamping = 0.22f;
+        desc.AngularDamping = 0.45f;
+        desc.MaxLinearSpeed = 11.0f;
+        desc.MaxAngularSpeed = 12.0f;
         desc.AllowSleeping = true;
         return desc;
     }
@@ -142,10 +163,10 @@ namespace
         desc.State.Position = position;
         desc.State.Rotation = RotationAroundZ(0.15f);
         desc.Mass = BoxMassProperties(halfExtents, 1.0f);
-        desc.LinearDamping = 0.04f;
-        desc.AngularDamping = 0.04f;
-        desc.MaxLinearSpeed = 35.0f;
-        desc.MaxAngularSpeed = 30.0f;
+        desc.LinearDamping = 0.22f;
+        desc.AngularDamping = 0.45f;
+        desc.MaxLinearSpeed = 11.0f;
+        desc.MaxAngularSpeed = 12.0f;
         desc.AllowSleeping = true;
         return desc;
     }
@@ -372,18 +393,19 @@ namespace
         state.World.Settings.SleepTime = 1.0f;
         state.World.Gravity = state.GravityEnabled ? DefaultGravity : Vec3f::Zero();
 
-        AddStaticBox(state, Vec3f{ 0.0f, -0.25f, 0.0f }, Vec3f{ 7.4f, 0.25f, 0.5f }, 0.0f, Color{ 0.34f, 0.37f, 0.42f, 1.0f });
-        AddStaticBox(state, Vec3f{ -7.25f, 3.0f, 0.0f }, Vec3f{ 0.25f, 3.25f, 0.5f }, 0.0f, Color{ 0.30f, 0.32f, 0.36f, 1.0f });
-        AddStaticBox(state, Vec3f{ 7.25f, 3.0f, 0.0f }, Vec3f{ 0.25f, 3.25f, 0.5f }, 0.0f, Color{ 0.30f, 0.32f, 0.36f, 1.0f });
+        AddStaticBox(state, Vec3f{ 0.0f, -0.25f, 0.0f }, Vec3f{ 8.65f, 0.25f, 0.5f }, 0.0f, Color{ 0.34f, 0.37f, 0.42f, 1.0f });
+        AddStaticBox(state, Vec3f{ -8.65f, 3.85f, 0.0f }, Vec3f{ 0.30f, 4.35f, 0.5f }, 0.0f, Color{ 0.30f, 0.32f, 0.36f, 1.0f });
+        AddStaticBox(state, Vec3f{ 8.65f, 3.85f, 0.0f }, Vec3f{ 0.30f, 4.35f, 0.5f }, 0.0f, Color{ 0.30f, 0.32f, 0.36f, 1.0f });
+        AddStaticBox(state, Vec3f{ 0.0f, 8.15f, 0.0f }, Vec3f{ 8.65f, 0.30f, 0.5f }, 0.0f, Color{ 0.30f, 0.32f, 0.36f, 1.0f });
         AddStaticBox(state, Vec3f{ -3.5f, 1.05f, 0.0f }, Vec3f{ 1.25f, 0.12f, 0.5f }, -0.25f, Color{ 0.42f, 0.43f, 0.48f, 1.0f });
         AddStaticBox(state, Vec3f{ 3.35f, 2.1f, 0.0f }, Vec3f{ 1.35f, 0.12f, 0.5f }, 0.28f, Color{ 0.42f, 0.43f, 0.48f, 1.0f });
         AddStaticBox(state, Vec3f{ 0.0f, 4.2f, 0.0f }, Vec3f{ 1.0f, 0.1f, 0.5f }, 0.0f, Color{ 0.42f, 0.43f, 0.48f, 1.0f });
         AddTrigger(state, Vec3f{ 0.0f, 1.75f, 0.0f }, Vec3f{ 0.9f, 0.08f, 0.5f }, Color{ 0.15f, 0.85f, 0.65f, 0.25f });
 
-        AddSphere(state, Vec3f{ -2.0f, 4.8f, 0.0f }, 0.42f, Color{ 0.31f, 0.68f, 0.96f, 1.0f });
-        AddSphere(state, Vec3f{ -1.1f, 5.7f, 0.0f }, 0.36f, Color{ 0.32f, 0.88f, 0.55f, 1.0f });
-        AddBox(state, Vec3f{ 1.2f, 4.9f, 0.0f }, Vec3f{ 0.45f, 0.45f, 0.5f }, Color{ 0.98f, 0.72f, 0.25f, 1.0f });
-        AddBox(state, Vec3f{ 2.1f, 5.8f, 0.0f }, Vec3f{ 0.55f, 0.32f, 0.5f }, Color{ 0.92f, 0.45f, 0.84f, 1.0f });
+        AddSphere(state, Vec3f{ -2.0f, 4.5f, 0.0f }, 0.42f, Color{ 0.31f, 0.68f, 0.96f, 1.0f });
+        AddSphere(state, Vec3f{ -1.1f, 5.25f, 0.0f }, 0.36f, Color{ 0.32f, 0.88f, 0.55f, 1.0f });
+        AddBox(state, Vec3f{ 1.2f, 4.6f, 0.0f }, Vec3f{ 0.45f, 0.45f, 0.5f }, Color{ 0.98f, 0.72f, 0.25f, 1.0f });
+        AddBox(state, Vec3f{ 2.1f, 5.35f, 0.0f }, Vec3f{ 0.55f, 0.32f, 0.5f }, Color{ 0.92f, 0.45f, 0.84f, 1.0f });
 
         state.Selected =
             state.Actors.size() - 4u;
@@ -445,7 +467,7 @@ namespace
 
         AddSphere(
             state,
-            Vec3f{ x, 6.8f, 0.0f },
+            Vec3f{ x, 6.55f, 0.0f },
             radius,
             state.SpawnIndex % 2 == 0
                 ? Color{ 0.34f, 0.75f, 0.98f, 1.0f }
@@ -467,7 +489,7 @@ namespace
 
         AddBox(
             state,
-            Vec3f{ x, 6.8f, 0.0f },
+            Vec3f{ x, 6.55f, 0.0f },
             halfExtents,
             state.SpawnIndex % 2 == 0
                 ? Color{ 0.98f, 0.73f, 0.25f, 1.0f }
@@ -491,6 +513,95 @@ namespace
                     Vec3f{ x, 0.45f + static_cast<float>(row) * 0.58f, 0.0f },
                     Vec3f{ 0.26f, 0.26f, 0.5f },
                     Color{ 0.96f, 0.62f, 0.25f, 1.0f });
+            }
+        }
+    }
+
+    [[nodiscard]]
+    float ActorContainmentRadius(
+        const Actor& actor)
+    {
+        if (actor.Kind == ActorKind::Sphere)
+        {
+            return actor.Radius;
+        }
+
+        return std::sqrt(
+            actor.HalfExtents.x * actor.HalfExtents.x +
+            actor.HalfExtents.y * actor.HalfExtents.y) + 0.05f;
+    }
+
+    void EnforcePlayBounds(
+        SandboxState& state)
+    {
+        for (Actor& actor : state.Actors)
+        {
+            if (!actor.Selectable || !ActorAlive(state, actor))
+            {
+                continue;
+            }
+
+            RigidBody& body =
+                state.World.Bodies().at(actor.Body);
+
+            const float radius =
+                ActorContainmentRadius(actor);
+
+            Vec3f position =
+                body.State.Position;
+
+            bool correctedX =
+                false;
+
+            bool correctedY =
+                false;
+
+            const float minX =
+                PlayLeft + radius;
+
+            const float maxX =
+                PlayRight - radius;
+
+            const float minY =
+                PlayBottom + radius;
+
+            const float maxY =
+                PlayTop - radius;
+
+            if (position.x < minX)
+            {
+                position.x = minX;
+                correctedX = true;
+            }
+            else if (position.x > maxX)
+            {
+                position.x = maxX;
+                correctedX = true;
+            }
+
+            if (position.y < minY)
+            {
+                position.y = minY;
+                correctedY = true;
+            }
+            else if (position.y > maxY)
+            {
+                position.y = maxY;
+                correctedY = true;
+            }
+
+            if (correctedX || correctedY)
+            {
+                body.State.Position = position;
+                if (correctedX)
+                {
+                    body.State.LinearVelocity.x = 0.0f;
+                }
+                if (correctedY)
+                {
+                    body.State.LinearVelocity.y = 0.0f;
+                }
+                state.World.WakeBody(actor.Body);
             }
         }
     }
@@ -797,25 +908,32 @@ namespace
 
             if (directMove)
             {
-                body.State.Position += direction * (5.0f * dt);
+                body.State.Position += direction * (DirectMoveSpeed * dt);
                 body.State.LinearVelocity = Vec3f::Zero();
                 state.World.WakeBody(actor->Body);
             }
             else
             {
-                state.World.AddBodyForce(actor->Body, direction * 95.0f);
+                const float mass =
+                    body.Mass.InverseMass > 0.0f
+                        ? 1.0f / body.Mass.InverseMass
+                        : 1.0f;
+
+                state.World.AddBodyForce(actor->Body, direction * (PushAcceleration * mass));
             }
         }
 
         if (KeyDown(window, GLFW_KEY_Q))
         {
-            state.World.AddBodyTorque(actor->Body, Vec3f{ 0.0f, 0.0f, 12.0f });
+            state.World.AddBodyTorque(actor->Body, Vec3f{ 0.0f, 0.0f, TorqueAcceleration });
         }
 
         if (KeyDown(window, GLFW_KEY_E))
         {
-            state.World.AddBodyTorque(actor->Body, Vec3f{ 0.0f, 0.0f, -12.0f });
+            state.World.AddBodyTorque(actor->Body, Vec3f{ 0.0f, 0.0f, -TorqueAcceleration });
         }
+
+        EnforcePlayBounds(state);
     }
 
     [[nodiscard]]
@@ -931,7 +1049,7 @@ namespace
         std::snprintf(
             title,
             sizeof(title),
-            "KairoPhysics Playground | %s | gravity %s | selected %u %s | dynamic %zu | contacts %zu events %zu | 1 sphere 2 box 3 stack Del remove C clear Tab select Arrows/WASD force Shift+move Q/E torque Space pause N step R reset G gravity T debug",
+            "KairoPhysics Playground | %s | gravity %s | selected %u %s | dynamic %zu | contacts %zu events %zu | 1 sphere 2 box 3 stack Delete remove C clear Tab next [ previous WASD/Arrows gentle push Shift+move Q/E torque Space pause N step R reset G gravity T debug",
             state.Paused ? "paused" : "running",
             state.GravityEnabled ? "on" : "off",
             body,
@@ -1030,7 +1148,7 @@ int main()
             SelectNext(state, 1);
         }
 
-        if (selectPrevious.Pressed(KeyDown(window.get(), GLFW_KEY_GRAVE_ACCENT)))
+        if (selectPrevious.Pressed(KeyDown(window.get(), GLFW_KEY_LEFT_BRACKET)))
         {
             SelectNext(state, -1);
         }
@@ -1073,10 +1191,12 @@ int main()
         if (!state.Paused || stepOnce)
         {
             state.World.StepFixed(
-                stepOnce ? (1.0f / 60.0f) : elapsed,
+                stepOnce ? (1.0f / 60.0f) : std::min(elapsed, 1.0f / 20.0f),
                 1.0f / 60.0f,
                 5);
         }
+
+        EnforcePlayBounds(state);
 
         int width = 0;
         int height = 0;
