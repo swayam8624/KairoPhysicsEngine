@@ -3,6 +3,7 @@
 
 import Kairo.Foundation.PhysicsEngine;
 import Kairo.Foundation.PhysicsMath;
+import Kairo.Foundation.Math.Quaternion;
 import Kairo.Foundation.Math.Vector;
 
 using namespace kairo::foundation::physics;
@@ -471,6 +472,64 @@ TEST_CASE("AABB contacts are detected", "[PhysicsEngine][Narrowphase]")
     REQUIRE(contact->Points[0].PenetrationDepth == Catch::Approx(0.25f));
 }
 
+TEST_CASE("Rotated BoxCollider uses SAT contacts", "[PhysicsEngine][Narrowphase]")
+{
+    const RigidBody a =
+        MakeRigidBody(0, StaticBody(Vec3f::Zero()));
+
+    const RigidBody b =
+        MakeRigidBody(1, StaticBody(Vec3f{ 0.75f, 0.0f, 0.0f }));
+
+    const Collider ca =
+        MakeCollider(
+            0,
+            0,
+            BoxCollider{ Vec3f{ 0.5f, 0.5f, 0.5f } });
+
+    const Collider cb =
+        MakeCollider(
+            1,
+            1,
+            BoxCollider{ Vec3f{ 0.5f, 0.5f, 0.5f } },
+            {},
+            Vec3f::Zero(),
+            RotationAroundZ(0.35f));
+
+    const auto contact =
+        CollidePair(a, ca, b, cb);
+
+    REQUIRE(contact.has_value());
+    REQUIRE(contact->Points.size() == 1);
+    REQUIRE(contact->Points[0].PenetrationDepth > 0.0f);
+}
+
+TEST_CASE("Rotated BoxCollider contacts planes through projected radius", "[PhysicsEngine][Narrowphase]")
+{
+    const RigidBody boxBody =
+        MakeRigidBody(0, StaticBody(Vec3f{ 0.0f, 0.45f, 0.0f }));
+
+    const RigidBody planeBody =
+        MakeRigidBody(1, StaticBody());
+
+    const Collider box =
+        MakeCollider(
+            0,
+            0,
+            BoxCollider{ Vec3f{ 0.5f, 0.25f, 0.5f } },
+            {},
+            Vec3f::Zero(),
+            RotationAroundZ(0.5f));
+
+    const Collider plane =
+        MakeCollider(1, 1, PlaneCollider{ Vec3f::Up(), 0.0f });
+
+    const auto contact =
+        CollidePair(boxBody, box, planeBody, plane);
+
+    REQUIRE(contact.has_value());
+    REQUIRE(contact->Points[0].Normal.y < 0.0f);
+}
+
 TEST_CASE("Invalid world inputs throw", "[PhysicsEngine][Validation]")
 {
     PhysicsWorld world;
@@ -483,6 +542,7 @@ TEST_CASE("Invalid world inputs throw", "[PhysicsEngine][Validation]")
         world.CreateRigidBody(DynamicSphereBody(Vec3f::Zero()));
 
     REQUIRE_THROWS_AS(world.AddCollider(body, SphereCollider{ -1.0f }), std::invalid_argument);
+    REQUIRE_THROWS_AS(world.AddCollider(body, BoxCollider{ Vec3f{ -1.0f, 1.0f, 1.0f } }), std::invalid_argument);
 
     RigidBodyDesc invalidDynamic;
     invalidDynamic.Type = BodyType::Dynamic;

@@ -1,5 +1,6 @@
 module;
 
+#include <array>
 #include <variant>
 
 export module Kairo.Foundation.PhysicsEngine.Collider;
@@ -33,8 +34,13 @@ export namespace kairo::foundation::physics
         Vec3f HalfExtents = Vec3f{ 0.5f, 0.5f, 0.5f };
     };
 
+    struct BoxCollider final
+    {
+        Vec3f HalfExtents = Vec3f{ 0.5f, 0.5f, 0.5f };
+    };
+
     using ColliderShape =
-        std::variant<SphereCollider, PlaneCollider, AABBCollider>;
+        std::variant<SphereCollider, PlaneCollider, AABBCollider, BoxCollider>;
 
     struct Collider final
     {
@@ -42,6 +48,7 @@ export namespace kairo::foundation::physics
         bool Active = true;
         BodyID Body = InvalidBodyID;
         Vec3f LocalCenter = Vec3f::Zero();
+        Quaternionf LocalRotation = Quaternionf::Identity();
         ColliderShape Shape = SphereCollider{};
         PhysicsMaterial Material;
         std::uint32_t BelongsTo = 1u;
@@ -110,6 +117,54 @@ export namespace kairo::foundation::physics
     }
 
     /// Input: body and collider.
+    /// Output: world-space collider orientation.
+    /// Task: combine body orientation with local collider rotation so shapes can
+    /// be authored as rotated child primitives without creating extra bodies.
+    [[nodiscard]]
+    inline Quaternionf WorldColliderRotation(
+        const RigidBody& body,
+        const Collider& collider)
+    {
+        return (body.State.Rotation * collider.LocalRotation).Normalized();
+    }
+
+    struct OrientedBoxFrame final
+    {
+        Vec3f Center = Vec3f::Zero();
+        std::array<Vec3f, 3> Axes
+        {
+            Vec3f::UnitX(),
+            Vec3f::UnitY(),
+            Vec3f::UnitZ()
+        };
+        Vec3f HalfExtents = Vec3f{ 0.5f, 0.5f, 0.5f };
+    };
+
+    /// Input: body, collider, and box half extents.
+    /// Output: OBB center, orthonormal axes, and extents in world space.
+    /// Task: prepare BoxCollider data for broadphase bounds and SAT narrowphase.
+    [[nodiscard]]
+    inline OrientedBoxFrame WorldBoxFrame(
+        const RigidBody& body,
+        const Collider& collider,
+        const Vec3f& halfExtents)
+    {
+        const Quaternionf rotation =
+            WorldColliderRotation(body, collider);
+
+        return
+        {
+            WorldColliderCenter(body, collider),
+            {
+                SafeNormalize(Rotate(rotation, Vec3f::UnitX()), Vec3f::UnitX()),
+                SafeNormalize(Rotate(rotation, Vec3f::UnitY()), Vec3f::UnitY()),
+                SafeNormalize(Rotate(rotation, Vec3f::UnitZ()), Vec3f::UnitZ())
+            },
+            halfExtents
+        };
+    }
+
+    /// Input: body and collider.
     /// Output: world-space AABB for finite collider shapes.
     /// Task: feed KairoSpatial broadphase with bounds derived from engine data.
     [[nodiscard]]
@@ -134,6 +189,21 @@ export namespace kairo::foundation::physics
             return AABBf::FromCenterExtent(center, box->HalfExtents);
         }
 
+        if (const auto* box = std::get_if<BoxCollider>(&collider.Shape))
+        {
+            RequirePositiveComponents(box->HalfExtents, "BoxCollider.HalfExtents");
+
+            const OrientedBoxFrame frame =
+                WorldBoxFrame(body, collider, box->HalfExtents);
+
+            const Vec3f extents =
+                Abs(frame.Axes[0]) * frame.HalfExtents.x +
+                Abs(frame.Axes[1]) * frame.HalfExtents.y +
+                Abs(frame.Axes[2]) * frame.HalfExtents.z;
+
+            return AABBf::FromCenterExtent(frame.Center, extents);
+        }
+
         return AABBf::Empty();
     }
 
@@ -146,10 +216,15 @@ export namespace kairo::foundation::physics
         BodyID body,
         ColliderShape shape,
         PhysicsMaterial material = {},
-        const Vec3f& localCenter = Vec3f::Zero())
+        const Vec3f& localCenter = Vec3f::Zero(),
+        const Quaternionf& localRotation = Quaternionf::Identity())
     {
         ValidatePhysicsMaterial(material);
         RequireFinite(localCenter, "localCenter");
+        RequireFinite(localRotation.x, "localRotation.x");
+        RequireFinite(localRotation.y, "localRotation.y");
+        RequireFinite(localRotation.z, "localRotation.z");
+        RequireFinite(localRotation.w, "localRotation.w");
 
         if (const auto* sphere = std::get_if<SphereCollider>(&shape))
         {
@@ -159,6 +234,10 @@ export namespace kairo::foundation::physics
         {
             RequirePositiveComponents(box->HalfExtents, "AABBCollider.HalfExtents");
         }
+        else if (const auto* box = std::get_if<BoxCollider>(&shape))
+        {
+            RequirePositiveComponents(box->HalfExtents, "BoxCollider.HalfExtents");
+        }
         else if (auto* plane = std::get_if<PlaneCollider>(&shape))
         {
             RequireFinite(plane->Normal, "PlaneCollider.Normal");
@@ -166,6 +245,6 @@ export namespace kairo::foundation::physics
             plane->Normal = SafeNormalize(plane->Normal, Vec3f::Up());
         }
 
-        return { id, true, body, localCenter, shape, material, 1u, 0xFFFF'FFFFu, false, 1u };
+        return { id, true, body, localCenter, localRotation.Normalized(), shape, material, 1u, 0xFFFF'FFFFu, false, 1u };
     }
 }
