@@ -3,6 +3,7 @@ module;
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -44,6 +45,7 @@ export namespace kairo::foundation::physics
         ColliderID ColliderA = InvalidColliderID;
         ColliderID ColliderB = InvalidColliderID;
         bool IsTrigger = false;
+        CollisionResponse Response = CollisionResponse::Block;
         PhysicsContactEventType Type = PhysicsContactEventType::Begin;
     };
 
@@ -61,9 +63,29 @@ export namespace kairo::foundation::physics
         bool IsTrigger = false;
     };
 
+    struct CollisionPairResponseRule final
+    {
+        ColliderID ColliderA = InvalidColliderID;
+        ColliderID ColliderB = InvalidColliderID;
+        CollisionResponse Response = CollisionResponse::Block;
+    };
+
+    struct CollisionLayerResponseRule final
+    {
+        std::uint32_t LayerA = CollisionLayer::Default;
+        std::uint32_t LayerB = CollisionLayer::Default;
+        CollisionResponse Response = CollisionResponse::Block;
+    };
+
     class PhysicsWorld final
     {
     public:
+        using CollisionFilterCallback =
+            std::function<CollisionResponse(const Collider&, const Collider&)>;
+
+        using ContactEventCallback =
+            std::function<void(const PhysicsContactEvent&)>;
+
         PhysicsStepSettings Settings;
         Vec3f Gravity = DefaultGravity;
 
@@ -141,6 +163,7 @@ export namespace kairo::foundation::physics
             record.Active = false;
             record.Body = InvalidBodyID;
             m_Broadphase.RemoveCollider(collider);
+            RemoveCollisionRulesForCollider(collider);
             RemoveCachedPairsForCollider(collider);
             RemoveCachedContactsForCollider(collider);
         }
@@ -167,6 +190,200 @@ export namespace kairo::foundation::physics
             record.CollidesWith = collidesWith;
             record.LayerMask = belongsTo;
             m_Broadphase.AddOrUpdateCollider(m_Bodies, record);
+        }
+
+        /// Input: collider id and one or more layer bits.
+        /// Output: collider category updated while keeping its existing mask.
+        /// Task: provide the common engine operation "make this object type X"
+        /// without forcing callers to restate all collision-mask bits.
+        void SetColliderCollisionLayer(
+            ColliderID collider,
+            std::uint32_t belongsTo)
+        {
+            if (!IsValidCollider(collider))
+            {
+                throw std::out_of_range("SetColliderCollisionLayer failed: collider id does not exist or is inactive.");
+            }
+
+            Collider& record =
+                m_Colliders.at(collider);
+
+            record.BelongsTo = belongsTo;
+            record.LayerMask = belongsTo;
+            m_Broadphase.AddOrUpdateCollider(m_Bodies, record);
+        }
+
+        /// Input: collider id and accepted layer bits.
+        /// Output: collider broadphase mask updated.
+        /// Task: expose the common engine operation "this object is willing to
+        /// consider these other object types" independently from its own layer.
+        void SetColliderCollisionMask(
+            ColliderID collider,
+            std::uint32_t collidesWith)
+        {
+            if (!IsValidCollider(collider))
+            {
+                throw std::out_of_range("SetColliderCollisionMask failed: collider id does not exist or is inactive.");
+            }
+
+            m_Colliders.at(collider).CollidesWith = collidesWith;
+        }
+
+        /// Input: two layer masks and the response wanted between them.
+        /// Output: world-level response rule installed or replaced.
+        /// Task: emulate commercial engine channel tables. Broadphase masks
+        /// still decide coarse visibility; this table decides whether an exact
+        /// overlap becomes ignored, trigger-only, or blocking contact.
+        void SetCollisionLayerResponse(
+            std::uint32_t layerA,
+            std::uint32_t layerB,
+            CollisionResponse response)
+        {
+            ValidateLayerMask(layerA, "layerA");
+            ValidateLayerMask(layerB, "layerB");
+            ValidateCollisionResponse(response);
+
+            const CollisionLayerResponseRule key =
+                OrderedLayerResponseRule(layerA, layerB, response);
+
+            const auto found =
+                std::find_if(
+                    m_LayerResponses.begin(),
+                    m_LayerResponses.end(),
+                    [&key](const CollisionLayerResponseRule& rule)
+                    {
+                        return SameLayerResponsePair(rule, key);
+                    });
+
+            if (found == m_LayerResponses.end())
+            {
+                m_LayerResponses.push_back(key);
+            }
+            else
+            {
+                found->Response = response;
+            }
+        }
+
+        /// Input: two layer masks.
+        /// Output: matching world-level response rule removed when present.
+        /// Task: let tools/game code restore default mask/trigger behavior
+        /// without recreating the world or every collider.
+        void ClearCollisionLayerResponse(
+            std::uint32_t layerA,
+            std::uint32_t layerB)
+        {
+            ValidateLayerMask(layerA, "layerA");
+            ValidateLayerMask(layerB, "layerB");
+
+            const CollisionLayerResponseRule key =
+                OrderedLayerResponseRule(layerA, layerB, CollisionResponse::Block);
+
+            m_LayerResponses.erase(
+                std::remove_if(
+                    m_LayerResponses.begin(),
+                    m_LayerResponses.end(),
+                    [&key](const CollisionLayerResponseRule& rule)
+                    {
+                        return SameLayerResponsePair(rule, key);
+                    }),
+                m_LayerResponses.end());
+        }
+
+        /// Input: two active colliders and the exact response wanted for them.
+        /// Output: pair-specific rule installed or replaced.
+        /// Task: support high-priority gameplay exceptions such as "this
+        /// projectile ignores the actor that spawned it" or "these two sensors
+        /// overlap but do not block" without changing whole layers.
+        void SetCollisionPairResponse(
+            ColliderID colliderA,
+            ColliderID colliderB,
+            CollisionResponse response)
+        {
+            RequireColliderPair(colliderA, colliderB, "SetCollisionPairResponse");
+            ValidateCollisionResponse(response);
+
+            const CollisionPairResponseRule key =
+                OrderedPairResponseRule(colliderA, colliderB, response);
+
+            const auto found =
+                std::find_if(
+                    m_PairResponses.begin(),
+                    m_PairResponses.end(),
+                    [&key](const CollisionPairResponseRule& rule)
+                    {
+                        return SamePairResponsePair(rule, key);
+                    });
+
+            if (found == m_PairResponses.end())
+            {
+                m_PairResponses.push_back(key);
+            }
+            else
+            {
+                found->Response = response;
+            }
+        }
+
+        /// Input: two collider ids.
+        /// Output: exact pair response override removed when present.
+        /// Task: restore layer/default collision behavior after a temporary
+        /// gameplay exception expires.
+        void ClearCollisionPairResponse(
+            ColliderID colliderA,
+            ColliderID colliderB)
+        {
+            RequireColliderPair(colliderA, colliderB, "ClearCollisionPairResponse");
+
+            const CollisionPairResponseRule key =
+                OrderedPairResponseRule(colliderA, colliderB, CollisionResponse::Block);
+
+            m_PairResponses.erase(
+                std::remove_if(
+                    m_PairResponses.begin(),
+                    m_PairResponses.end(),
+                    [&key](const CollisionPairResponseRule& rule)
+                    {
+                        return SamePairResponsePair(rule, key);
+                    }),
+                m_PairResponses.end());
+        }
+
+        /// Input: optional callback returning a response for each exact contact.
+        /// Output: callback stored and called during `Step` after narrowphase.
+        /// Task: let gameplay/tooling make runtime decisions. Pair overrides
+        /// still win first; this callback is the next hook before layer/default
+        /// response. It should be deterministic and must not call `Step`.
+        void SetCollisionFilterCallback(
+            CollisionFilterCallback callback)
+        {
+            m_CollisionFilterCallback = std::move(callback);
+        }
+
+        /// Input: none.
+        /// Output: runtime filter callback cleared.
+        /// Task: restore pure data-driven collision response behavior.
+        void ClearCollisionFilterCallback()
+        {
+            m_CollisionFilterCallback = nullptr;
+        }
+
+        /// Input: optional callback invoked for Begin/Stay/End events.
+        /// Output: callback stored and invoked synchronously during `Step`.
+        /// Task: provide game-engine style event hooks while keeping
+        /// `ContactEvents()` available for polling and deterministic tests.
+        void SetContactEventCallback(
+            ContactEventCallback callback)
+        {
+            m_ContactEventCallback = std::move(callback);
+        }
+
+        /// Input: none.
+        /// Output: contact event callback cleared.
+        /// Task: stop synchronous event dispatch without changing simulation.
+        void ClearContactEventCallback()
+        {
+            m_ContactEventCallback = nullptr;
         }
 
         /// Input: collider id and trigger state.
@@ -313,7 +530,9 @@ export namespace kairo::foundation::physics
             m_LastContacts =
                 ComputeContacts(m_Bodies, m_Colliders, m_LastPairs);
 
+            ApplyCollisionResponses();
             UpdateContactEvents();
+            DispatchContactEvents();
             WakeContactBodies();
             RestoreContactCache();
             WarmStartContacts(m_Bodies, m_Colliders, m_LastContacts);
@@ -578,6 +797,10 @@ export namespace kairo::foundation::physics
         std::vector<ContactManifold> m_LastContacts;
         std::vector<PhysicsContactEvent> m_LastEvents;
         float m_FixedAccumulator = 0.0f;
+        std::vector<CollisionPairResponseRule> m_PairResponses;
+        std::vector<CollisionLayerResponseRule> m_LayerResponses;
+        CollisionFilterCallback m_CollisionFilterCallback;
+        ContactEventCallback m_ContactEventCallback;
 
         struct ContactEventKey final
         {
@@ -586,6 +809,7 @@ export namespace kairo::foundation::physics
             ColliderID ColliderA = InvalidColliderID;
             ColliderID ColliderB = InvalidColliderID;
             bool IsTrigger = false;
+            CollisionResponse Response = CollisionResponse::Block;
         };
 
         std::vector<ContactEventKey> m_PreviousContactKeys;
@@ -602,6 +826,248 @@ export namespace kairo::foundation::physics
         };
 
         std::vector<ContactCacheEntry> m_ContactCache;
+
+        static void ValidateLayerMask(
+            std::uint32_t layerMask,
+            const char* name)
+        {
+            if (layerMask == 0u)
+            {
+                throw std::invalid_argument(std::string(name) + " must contain at least one collision layer bit.");
+            }
+        }
+
+        static void ValidateCollisionResponse(
+            CollisionResponse response)
+        {
+            switch (response)
+            {
+            case CollisionResponse::Ignore:
+            case CollisionResponse::Trigger:
+            case CollisionResponse::Block:
+                return;
+            }
+
+            throw std::invalid_argument("CollisionResponse contains an invalid enum value.");
+        }
+
+        void RequireColliderPair(
+            ColliderID colliderA,
+            ColliderID colliderB,
+            const char* operation) const
+        {
+            if (!IsValidCollider(colliderA) || !IsValidCollider(colliderB))
+            {
+                throw std::out_of_range(
+                    std::string(operation) +
+                    " failed: collider id does not exist or is inactive.");
+            }
+
+            if (colliderA == colliderB)
+            {
+                throw std::invalid_argument(
+                    std::string(operation) +
+                    " failed: collider pair must contain two different colliders.");
+            }
+        }
+
+        [[nodiscard]]
+        static CollisionPairResponseRule OrderedPairResponseRule(
+            ColliderID colliderA,
+            ColliderID colliderB,
+            CollisionResponse response) noexcept
+        {
+            return colliderA < colliderB
+                ? CollisionPairResponseRule{ colliderA, colliderB, response }
+                : CollisionPairResponseRule{ colliderB, colliderA, response };
+        }
+
+        [[nodiscard]]
+        static CollisionLayerResponseRule OrderedLayerResponseRule(
+            std::uint32_t layerA,
+            std::uint32_t layerB,
+            CollisionResponse response) noexcept
+        {
+            return layerA < layerB
+                ? CollisionLayerResponseRule{ layerA, layerB, response }
+                : CollisionLayerResponseRule{ layerB, layerA, response };
+        }
+
+        [[nodiscard]]
+        static bool SamePairResponsePair(
+            const CollisionPairResponseRule& lhs,
+            const CollisionPairResponseRule& rhs) noexcept
+        {
+            return lhs.ColliderA == rhs.ColliderA &&
+                lhs.ColliderB == rhs.ColliderB;
+        }
+
+        [[nodiscard]]
+        static bool SameLayerResponsePair(
+            const CollisionLayerResponseRule& lhs,
+            const CollisionLayerResponseRule& rhs) noexcept
+        {
+            return lhs.LayerA == rhs.LayerA &&
+                lhs.LayerB == rhs.LayerB;
+        }
+
+        [[nodiscard]]
+        static bool LayerRuleMatches(
+            const CollisionLayerResponseRule& rule,
+            const Collider& colliderA,
+            const Collider& colliderB) noexcept
+        {
+            const std::uint32_t layerA =
+                BroadphaseCategoryMask(colliderA);
+
+            const std::uint32_t layerB =
+                BroadphaseCategoryMask(colliderB);
+
+            return ((layerA & rule.LayerA) != 0u && (layerB & rule.LayerB) != 0u) ||
+                ((layerA & rule.LayerB) != 0u && (layerB & rule.LayerA) != 0u);
+        }
+
+        [[nodiscard]]
+        std::optional<CollisionResponse> PairResponseOverride(
+            ColliderID colliderA,
+            ColliderID colliderB) const
+        {
+            const CollisionPairResponseRule key =
+                OrderedPairResponseRule(colliderA, colliderB, CollisionResponse::Block);
+
+            const auto found =
+                std::find_if(
+                    m_PairResponses.begin(),
+                    m_PairResponses.end(),
+                    [&key](const CollisionPairResponseRule& rule)
+                    {
+                        return SamePairResponsePair(rule, key);
+                    });
+
+            if (found == m_PairResponses.end())
+            {
+                return std::nullopt;
+            }
+
+            return found->Response;
+        }
+
+        [[nodiscard]]
+        std::optional<CollisionResponse> LayerResponseOverride(
+            const Collider& colliderA,
+            const Collider& colliderB) const
+        {
+            const auto found =
+                std::find_if(
+                    m_LayerResponses.begin(),
+                    m_LayerResponses.end(),
+                    [&colliderA, &colliderB](const CollisionLayerResponseRule& rule)
+                    {
+                        return LayerRuleMatches(rule, colliderA, colliderB);
+                    });
+
+            if (found == m_LayerResponses.end())
+            {
+                return std::nullopt;
+            }
+
+            return found->Response;
+        }
+
+        [[nodiscard]]
+        CollisionResponse ResolveCollisionResponse(
+            const Collider& colliderA,
+            const Collider& colliderB) const
+        {
+            if (const std::optional<CollisionResponse> pairOverride =
+                PairResponseOverride(colliderA.ID, colliderB.ID))
+            {
+                ValidateCollisionResponse(*pairOverride);
+                return *pairOverride;
+            }
+
+            if (m_CollisionFilterCallback)
+            {
+                const CollisionResponse callbackResponse =
+                    m_CollisionFilterCallback(colliderA, colliderB);
+
+                ValidateCollisionResponse(callbackResponse);
+                return callbackResponse;
+            }
+
+            if (const std::optional<CollisionResponse> layerOverride =
+                LayerResponseOverride(colliderA, colliderB))
+            {
+                ValidateCollisionResponse(*layerOverride);
+                return *layerOverride;
+            }
+
+            return DefaultCollisionResponse(colliderA, colliderB);
+        }
+
+        void ApplyCollisionResponses()
+        {
+            std::vector<ContactManifold> filtered;
+            filtered.reserve(m_LastContacts.size());
+
+            for (ContactManifold manifold : m_LastContacts)
+            {
+                if (manifold.ColliderA >= m_Colliders.size() ||
+                    manifold.ColliderB >= m_Colliders.size())
+                {
+                    continue;
+                }
+
+                const Collider& colliderA =
+                    m_Colliders.at(manifold.ColliderA);
+
+                const Collider& colliderB =
+                    m_Colliders.at(manifold.ColliderB);
+
+                const CollisionResponse response =
+                    ResolveCollisionResponse(colliderA, colliderB);
+
+                if (response == CollisionResponse::Ignore)
+                {
+                    continue;
+                }
+
+                manifold.IsTrigger =
+                    response == CollisionResponse::Trigger;
+
+                filtered.push_back(manifold);
+            }
+
+            m_LastContacts = std::move(filtered);
+        }
+
+        void DispatchContactEvents()
+        {
+            if (!m_ContactEventCallback)
+            {
+                return;
+            }
+
+            for (const PhysicsContactEvent& event : m_LastEvents)
+            {
+                m_ContactEventCallback(event);
+            }
+        }
+
+        void RemoveCollisionRulesForCollider(
+            ColliderID collider)
+        {
+            m_PairResponses.erase(
+                std::remove_if(
+                    m_PairResponses.begin(),
+                    m_PairResponses.end(),
+                    [collider](const CollisionPairResponseRule& rule)
+                    {
+                        return rule.ColliderA == collider ||
+                            rule.ColliderB == collider;
+                    }),
+                m_PairResponses.end());
+        }
 
         [[nodiscard]]
         static Vec3f ValidateRayDirection(
@@ -1047,6 +1513,15 @@ export namespace kairo::foundation::physics
         }
 
         [[nodiscard]]
+        static CollisionResponse ContactResponse(
+            const ContactManifold& manifold) noexcept
+        {
+            return manifold.IsTrigger
+                ? CollisionResponse::Trigger
+                : CollisionResponse::Block;
+        }
+
+        [[nodiscard]]
         static ContactEventKey MakeContactEventKey(
             const ContactManifold& manifold) noexcept
         {
@@ -1056,7 +1531,8 @@ export namespace kairo::foundation::physics
                 manifold.BodyB,
                 manifold.ColliderA,
                 manifold.ColliderB,
-                manifold.IsTrigger
+                manifold.IsTrigger,
+                ContactResponse(manifold)
             };
         }
 
@@ -1069,7 +1545,8 @@ export namespace kairo::foundation::physics
                 lhs.BodyB == rhs.BodyB &&
                 lhs.ColliderA == rhs.ColliderA &&
                 lhs.ColliderB == rhs.ColliderB &&
-                lhs.IsTrigger == rhs.IsTrigger;
+                lhs.IsTrigger == rhs.IsTrigger &&
+                lhs.Response == rhs.Response;
         }
 
         [[nodiscard]]
@@ -1093,7 +1570,11 @@ export namespace kairo::foundation::physics
             {
                 return lhs.ColliderB < rhs.ColliderB;
             }
-            return lhs.IsTrigger < rhs.IsTrigger;
+            if (lhs.IsTrigger != rhs.IsTrigger)
+            {
+                return lhs.IsTrigger < rhs.IsTrigger;
+            }
+            return static_cast<std::uint8_t>(lhs.Response) < static_cast<std::uint8_t>(rhs.Response);
         }
 
         [[nodiscard]]
@@ -1108,6 +1589,7 @@ export namespace kairo::foundation::physics
                 key.ColliderA,
                 key.ColliderB,
                 key.IsTrigger,
+                key.Response,
                 type
             };
         }
@@ -1171,8 +1653,8 @@ export namespace kairo::foundation::physics
                 [](const PhysicsContactEvent& lhs, const PhysicsContactEvent& rhs)
                 {
                     return LessContactEventKey(
-                        ContactEventKey{ lhs.BodyA, lhs.BodyB, lhs.ColliderA, lhs.ColliderB, lhs.IsTrigger },
-                        ContactEventKey{ rhs.BodyA, rhs.BodyB, rhs.ColliderA, rhs.ColliderB, rhs.IsTrigger });
+                        ContactEventKey{ lhs.BodyA, lhs.BodyB, lhs.ColliderA, lhs.ColliderB, lhs.IsTrigger, lhs.Response },
+                        ContactEventKey{ rhs.BodyA, rhs.BodyB, rhs.ColliderA, rhs.ColliderB, rhs.IsTrigger, rhs.Response });
                 });
 
             m_PreviousContactKeys = std::move(current);
@@ -1235,6 +1717,11 @@ export namespace kairo::foundation::physics
         {
             for (const ContactManifold& manifold : m_LastContacts)
             {
+                if (manifold.IsTrigger)
+                {
+                    continue;
+                }
+
                 if (manifold.BodyA >= m_Bodies.size() ||
                     manifold.BodyB >= m_Bodies.size())
                 {

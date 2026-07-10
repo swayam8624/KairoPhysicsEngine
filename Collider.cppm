@@ -1,6 +1,7 @@
 module;
 
 #include <array>
+#include <cstdint>
 #include <variant>
 
 export module Kairo.Foundation.PhysicsEngine.Collider;
@@ -17,6 +18,43 @@ export namespace kairo::foundation::physics
 {
     using namespace kairo::foundation::math;
     using namespace kairo::foundation::geometry;
+
+    /// Game-engine style response for a candidate collider pair.
+    ///
+    /// Input: two colliders selected by broadphase/narrowphase.
+    /// Output: whether that pair is ignored, reported as a trigger, or solved.
+    /// Task: separate "what objects can see each other" from "what the solver
+    /// should do with the contact." This is the same idea as collision response
+    /// channels in commercial engines: a player can block terrain, overlap a
+    /// pickup trigger, and ignore its own sensor rays with the same collider API.
+    enum class CollisionResponse : std::uint8_t
+    {
+        Ignore,
+        Trigger,
+        Block
+    };
+
+    /// Built-in layer bits for common gameplay categories.
+    ///
+    /// Input: none.
+    /// Output: stable 32-bit category masks that callers can combine or replace.
+    /// Task: provide useful defaults without locking the engine into a fixed
+    /// gameplay taxonomy. Users can still pass custom `1u << n` masks directly.
+    struct CollisionLayer final
+    {
+        static constexpr std::uint32_t Default = 1u << 0u;
+        static constexpr std::uint32_t StaticWorld = 1u << 1u;
+        static constexpr std::uint32_t DynamicWorld = 1u << 2u;
+        static constexpr std::uint32_t Player = 1u << 3u;
+        static constexpr std::uint32_t Character = 1u << 4u;
+        static constexpr std::uint32_t Projectile = 1u << 5u;
+        static constexpr std::uint32_t Trigger = 1u << 6u;
+        static constexpr std::uint32_t Sensor = 1u << 7u;
+        static constexpr std::uint32_t Cloth = 1u << 8u;
+        static constexpr std::uint32_t Fluid = 1u << 9u;
+        static constexpr std::uint32_t Particle = 1u << 10u;
+        static constexpr std::uint32_t All = 0xFFFF'FFFFu;
+    };
 
     struct SphereCollider final
     {
@@ -92,6 +130,28 @@ export namespace kairo::foundation::physics
     {
         return (a.CollidesWith & b.BelongsTo) != 0u &&
             (b.CollidesWith & a.BelongsTo) != 0u;
+    }
+
+    /// Input: two colliders after coarse masks allow them to be considered.
+    /// Output: default response before world-level override rules/callbacks.
+    /// Task: preserve the existing V1 behavior: masks ignore, trigger colliders
+    /// report overlap only, and all other allowed pairs block/solve.
+    [[nodiscard]]
+    inline CollisionResponse DefaultCollisionResponse(
+        const Collider& a,
+        const Collider& b) noexcept
+    {
+        if (!CollisionFiltersAllow(a, b))
+        {
+            return CollisionResponse::Ignore;
+        }
+
+        if (a.IsTrigger || b.IsTrigger)
+        {
+            return CollisionResponse::Trigger;
+        }
+
+        return CollisionResponse::Block;
     }
 
     /// Input: collider.

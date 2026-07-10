@@ -680,6 +680,119 @@ TEST_CASE("World overlap queries return active finite colliders", "[PhysicsEngin
     REQUIRE(sphereHits[0] == sphereCollider);
 }
 
+TEST_CASE("Collision layer responses choose ignore trigger or block", "[PhysicsEngine][World][CollisionRules]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    const BodyID player =
+        world.CreateRigidBody(StaticBody(Vec3f::Zero()));
+
+    const BodyID pickup =
+        world.CreateRigidBody(StaticBody(Vec3f{ 0.75f, 0.0f, 0.0f }));
+
+    const ColliderID playerCollider =
+        world.AddCollider(player, SphereCollider{ 0.5f });
+
+    const ColliderID pickupCollider =
+        world.AddCollider(pickup, SphereCollider{ 0.5f });
+
+    world.SetColliderCollisionLayer(playerCollider, CollisionLayer::Player);
+    world.SetColliderCollisionLayer(pickupCollider, CollisionLayer::Trigger);
+    world.SetCollisionLayerResponse(CollisionLayer::Player, CollisionLayer::Trigger, CollisionResponse::Ignore);
+
+    world.Step(1.0f / 60.0f);
+    REQUIRE(world.Contacts().empty());
+    REQUIRE(world.ContactEvents().empty());
+
+    world.SetCollisionLayerResponse(CollisionLayer::Player, CollisionLayer::Trigger, CollisionResponse::Trigger);
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.Contacts().size() == 1);
+    REQUIRE(world.Contacts()[0].IsTrigger);
+    REQUIRE(world.ContactEvents().size() == 1);
+    REQUIRE(world.ContactEvents()[0].IsTrigger);
+    REQUIRE(world.ContactEvents()[0].Response == CollisionResponse::Trigger);
+
+    world.SetCollisionLayerResponse(CollisionLayer::Player, CollisionLayer::Trigger, CollisionResponse::Block);
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.Contacts().size() == 1);
+    REQUIRE_FALSE(world.Contacts()[0].IsTrigger);
+    REQUIRE(world.ContactEvents()[0].Response == CollisionResponse::Block);
+}
+
+TEST_CASE("Collision pair response overrides layer response", "[PhysicsEngine][World][CollisionRules]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+
+    const BodyID projectile =
+        world.CreateRigidBody(StaticBody(Vec3f::Zero()));
+
+    const BodyID owner =
+        world.CreateRigidBody(StaticBody(Vec3f{ 0.75f, 0.0f, 0.0f }));
+
+    const ColliderID projectileCollider =
+        world.AddCollider(projectile, SphereCollider{ 0.5f });
+
+    const ColliderID ownerCollider =
+        world.AddCollider(owner, SphereCollider{ 0.5f });
+
+    world.SetColliderCollisionLayer(projectileCollider, CollisionLayer::Projectile);
+    world.SetColliderCollisionLayer(ownerCollider, CollisionLayer::Player);
+    world.SetCollisionLayerResponse(CollisionLayer::Projectile, CollisionLayer::Player, CollisionResponse::Ignore);
+    world.SetCollisionPairResponse(projectileCollider, ownerCollider, CollisionResponse::Block);
+
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.Contacts().size() == 1);
+    REQUIRE_FALSE(world.Contacts()[0].IsTrigger);
+    REQUIRE(world.ContactEvents()[0].Response == CollisionResponse::Block);
+
+    world.ClearCollisionPairResponse(projectileCollider, ownerCollider);
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.Contacts().empty());
+}
+
+TEST_CASE("Collision filter callback can classify pairs at runtime", "[PhysicsEngine][World][CollisionRules]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+
+    const BodyID sensor =
+        world.CreateRigidBody(StaticBody(Vec3f::Zero()));
+
+    const BodyID target =
+        world.CreateRigidBody(StaticBody(Vec3f{ 0.75f, 0.0f, 0.0f }));
+
+    const ColliderID sensorCollider =
+        world.AddCollider(sensor, SphereCollider{ 0.5f });
+
+    const ColliderID targetCollider =
+        world.AddCollider(target, SphereCollider{ 0.5f });
+
+    world.SetCollisionFilterCallback(
+        [sensorCollider, targetCollider](const Collider& a, const Collider& b)
+        {
+            const bool selectedPair =
+                (a.ID == sensorCollider && b.ID == targetCollider) ||
+                (a.ID == targetCollider && b.ID == sensorCollider);
+
+            return selectedPair
+                ? CollisionResponse::Trigger
+                : CollisionResponse::Ignore;
+        });
+
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.Contacts().size() == 1);
+    REQUIRE(world.Contacts()[0].IsTrigger);
+    REQUIRE(world.ContactEvents()[0].Response == CollisionResponse::Trigger);
+}
+
 TEST_CASE("World raycasts return nearest and sorted collider hits", "[PhysicsEngine][World]")
 {
     PhysicsWorld world;
@@ -749,6 +862,12 @@ TEST_CASE("World reports deterministic contact begin stay and end events", "[Phy
     PhysicsWorld world;
     world.Gravity = Vec3f::Zero();
     world.Settings.EnableSleeping = false;
+    std::vector<PhysicsContactEvent> callbackEvents;
+    world.SetContactEventCallback(
+        [&callbackEvents](const PhysicsContactEvent& event)
+        {
+            callbackEvents.push_back(event);
+        });
 
     const BodyID a =
         world.CreateRigidBody(StaticBody(Vec3f::Zero()));
@@ -765,16 +884,20 @@ TEST_CASE("World reports deterministic contact begin stay and end events", "[Phy
     world.Step(1.0f / 60.0f);
     REQUIRE(world.ContactEvents().size() == 1);
     REQUIRE(world.ContactEvents()[0].Type == PhysicsContactEventType::Begin);
+    REQUIRE(callbackEvents.back().Type == PhysicsContactEventType::Begin);
 
     world.Step(1.0f / 60.0f);
     REQUIRE(world.ContactEvents().size() == 1);
     REQUIRE(world.ContactEvents()[0].Type == PhysicsContactEventType::Stay);
+    REQUIRE(callbackEvents.back().Type == PhysicsContactEventType::Stay);
 
     world.Bodies()[b].State.Position = Vec3f{ 4.0f, 0.0f, 0.0f };
     world.Step(1.0f / 60.0f);
 
     REQUIRE(world.ContactEvents().size() == 1);
     REQUIRE(world.ContactEvents()[0].Type == PhysicsContactEventType::End);
+    REQUIRE(callbackEvents.back().Type == PhysicsContactEventType::End);
+    REQUIRE(callbackEvents.size() == 3);
 }
 
 TEST_CASE("Fixed stepping is deterministic for replay-equivalent worlds", "[PhysicsEngine][World]")
@@ -969,8 +1092,14 @@ TEST_CASE("Invalid world inputs throw", "[PhysicsEngine][Validation]")
     const BodyID body =
         world.CreateRigidBody(DynamicSphereBody(Vec3f::Zero()));
 
+    const ColliderID validCollider =
+        world.AddCollider(body, SphereCollider{ 0.5f });
+
     REQUIRE_THROWS_AS(world.AddCollider(body, SphereCollider{ -1.0f }), std::invalid_argument);
     REQUIRE_THROWS_AS(world.AddCollider(body, BoxCollider{ Vec3f{ -1.0f, 1.0f, 1.0f } }), std::invalid_argument);
+    REQUIRE_THROWS_AS(world.SetCollisionLayerResponse(0u, CollisionLayer::Default, CollisionResponse::Block), std::invalid_argument);
+    REQUIRE_THROWS_AS(world.SetCollisionPairResponse(validCollider, validCollider, CollisionResponse::Ignore), std::invalid_argument);
+    REQUIRE_THROWS_AS(world.SetCollisionPairResponse(validCollider, 99, CollisionResponse::Ignore), std::out_of_range);
 
     RigidBodyDesc invalidDynamic;
     invalidDynamic.Type = BodyType::Dynamic;
