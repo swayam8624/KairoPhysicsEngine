@@ -6,11 +6,17 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(KAIRO_PHYSICS_ENGINE_BUILD_TESTS "Build KairoPhysicsEngine tests" ${PROJECT_IS_TOP_LEVEL})
+option(KAIRO_PHYSICS_ENGINE_BUILD_SANDBOX "Build terminal KairoPhysicsEngine sandbox" ${PROJECT_IS_TOP_LEVEL})
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 elseif(MSVC)
     add_compile_options(/W4)
+endif()
+
+if(KAIRO_PHYSICS_ENGINE_BUILD_SANDBOX)
+    add_executable(KairoPhysicsSandbox sandbox/KairoPhysicsSandbox.cpp)
+    target_link_libraries(KairoPhysicsSandbox PRIVATE KairoPhysicsEngine)
 endif()
 
 if(NOT TARGET KairoPhysicsMath)

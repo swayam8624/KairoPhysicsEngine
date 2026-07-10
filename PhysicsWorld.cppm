@@ -83,7 +83,8 @@ export namespace kairo::foundation::physics
             BodyID body,
             ColliderShape shape,
             PhysicsMaterial material = {},
-            const Vec3f& localCenter = Vec3f::Zero())
+            const Vec3f& localCenter = Vec3f::Zero(),
+            const Quaternionf& localRotation = Quaternionf::Identity())
         {
             if (!IsValidBody(body))
             {
@@ -94,7 +95,7 @@ export namespace kairo::foundation::physics
                 static_cast<ColliderID>(m_Colliders.size());
 
             m_Colliders.push_back(
-                MakeCollider(id, body, shape, material, localCenter));
+                MakeCollider(id, body, shape, material, localCenter, localRotation));
 
             m_Broadphase.AddOrUpdateCollider(m_Bodies, m_Colliders.back());
             return id;
