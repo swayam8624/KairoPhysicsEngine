@@ -61,6 +61,21 @@ namespace
     constexpr float TorqueAcceleration =
         3.2f;
 
+    constexpr float RayMaxDistance =
+        14.0f;
+
+    constexpr int RayFanCount =
+        17;
+
+    constexpr float RayFanSpread =
+        1.35f;
+
+    constexpr float RayRotationSpeed =
+        1.8f;
+
+    constexpr float CollisionDemoSpeed =
+        4.4f;
+
     enum class ActorKind
     {
         Sphere,
@@ -113,6 +128,8 @@ namespace
         bool Paused = false;
         bool ShowDebug = true;
         bool GravityEnabled = true;
+        bool ShowRays = true;
+        float RayAngle = 0.0f;
         int SpawnIndex = 0;
     };
 
@@ -384,10 +401,19 @@ namespace
         const bool gravityEnabled =
             state.GravityEnabled;
 
+        const bool showRays =
+            state.ShowRays;
+
+        const float rayAngle =
+            state.RayAngle;
+
         state = SandboxState{};
         state.Paused = paused;
         state.ShowDebug = showDebug;
         state.GravityEnabled = gravityEnabled;
+        state.ShowRays = showRays;
+        state.RayAngle = rayAngle;
+        state.World.Settings.EnableSleeping = false;
         state.World.Settings.VelocityIterations = 18;
         state.World.Settings.PositionIterations = 8;
         state.World.Settings.SleepTime = 1.0f;
@@ -402,10 +428,22 @@ namespace
         AddStaticBox(state, Vec3f{ 0.0f, 4.2f, 0.0f }, Vec3f{ 1.0f, 0.1f, 0.5f }, 0.0f, Color{ 0.42f, 0.43f, 0.48f, 1.0f });
         AddTrigger(state, Vec3f{ 0.0f, 1.75f, 0.0f }, Vec3f{ 0.9f, 0.08f, 0.5f }, Color{ 0.15f, 0.85f, 0.65f, 0.25f });
 
-        AddSphere(state, Vec3f{ -2.0f, 4.5f, 0.0f }, 0.42f, Color{ 0.31f, 0.68f, 0.96f, 1.0f });
-        AddSphere(state, Vec3f{ -1.1f, 5.25f, 0.0f }, 0.36f, Color{ 0.32f, 0.88f, 0.55f, 1.0f });
-        AddBox(state, Vec3f{ 1.2f, 4.6f, 0.0f }, Vec3f{ 0.45f, 0.45f, 0.5f }, Color{ 0.98f, 0.72f, 0.25f, 1.0f });
-        AddBox(state, Vec3f{ 2.1f, 5.35f, 0.0f }, Vec3f{ 0.55f, 0.32f, 0.5f }, Color{ 0.92f, 0.45f, 0.84f, 1.0f });
+        const BodyID blue =
+            AddSphere(state, Vec3f{ -0.95f, 4.55f, 0.0f }, 0.42f, Color{ 0.31f, 0.68f, 0.96f, 1.0f }).Body;
+
+        const BodyID green =
+            AddSphere(state, Vec3f{ -0.10f, 5.10f, 0.0f }, 0.36f, Color{ 0.32f, 0.88f, 0.55f, 1.0f }).Body;
+
+        const BodyID amber =
+            AddBox(state, Vec3f{ 0.65f, 4.60f, 0.0f }, Vec3f{ 0.45f, 0.45f, 0.5f }, Color{ 0.98f, 0.72f, 0.25f, 1.0f }).Body;
+
+        const BodyID magenta =
+            AddBox(state, Vec3f{ 1.25f, 5.25f, 0.0f }, Vec3f{ 0.55f, 0.32f, 0.5f }, Color{ 0.92f, 0.45f, 0.84f, 1.0f }).Body;
+
+        state.World.Bodies().at(blue).State.LinearVelocity = Vec3f{ 1.0f, 0.0f, 0.0f };
+        state.World.Bodies().at(green).State.LinearVelocity = Vec3f{ 0.55f, -0.1f, 0.0f };
+        state.World.Bodies().at(amber).State.LinearVelocity = Vec3f{ -0.7f, 0.0f, 0.0f };
+        state.World.Bodies().at(magenta).State.LinearVelocity = Vec3f{ -0.45f, -0.05f, 0.0f };
 
         state.Selected =
             state.Actors.size() - 4u;
@@ -515,6 +553,65 @@ namespace
                     Color{ 0.96f, 0.62f, 0.25f, 1.0f });
             }
         }
+    }
+
+    void SpawnCollisionDemo(
+        SandboxState& state)
+    {
+        const BodyID leftSphere =
+            AddSphere(
+                state,
+                Vec3f{ -4.4f, 5.15f, 0.0f },
+                0.46f,
+                Color{ 0.28f, 0.78f, 1.0f, 1.0f }).Body;
+
+        const BodyID rightSphere =
+            AddSphere(
+                state,
+                Vec3f{ 4.4f, 5.15f, 0.0f },
+                0.46f,
+                Color{ 0.28f, 0.96f, 0.58f, 1.0f }).Body;
+
+        const BodyID leftBox =
+            AddBox(
+                state,
+                Vec3f{ -4.8f, 3.25f, 0.0f },
+                Vec3f{ 0.50f, 0.38f, 0.5f },
+                Color{ 1.0f, 0.72f, 0.22f, 1.0f }).Body;
+
+        const BodyID rightBox =
+            AddBox(
+                state,
+                Vec3f{ 4.8f, 3.25f, 0.0f },
+                Vec3f{ 0.50f, 0.38f, 0.5f },
+                Color{ 0.94f, 0.42f, 0.92f, 1.0f }).Body;
+
+        RigidBody& leftSphereBody =
+            state.World.Bodies().at(leftSphere);
+
+        RigidBody& rightSphereBody =
+            state.World.Bodies().at(rightSphere);
+
+        RigidBody& leftBoxBody =
+            state.World.Bodies().at(leftBox);
+
+        RigidBody& rightBoxBody =
+            state.World.Bodies().at(rightBox);
+
+        leftSphereBody.EnableGravity = false;
+        rightSphereBody.EnableGravity = false;
+        leftBoxBody.EnableGravity = false;
+        rightBoxBody.EnableGravity = false;
+
+        leftSphereBody.LinearDamping = 0.03f;
+        rightSphereBody.LinearDamping = 0.03f;
+        leftBoxBody.LinearDamping = 0.03f;
+        rightBoxBody.LinearDamping = 0.03f;
+
+        leftSphereBody.State.LinearVelocity = Vec3f{ CollisionDemoSpeed, 0.0f, 0.0f };
+        rightSphereBody.State.LinearVelocity = Vec3f{ -CollisionDemoSpeed, 0.0f, 0.0f };
+        leftBoxBody.State.LinearVelocity = Vec3f{ CollisionDemoSpeed * 0.95f, 0.0f, 0.0f };
+        rightBoxBody.State.LinearVelocity = Vec3f{ -CollisionDemoSpeed * 0.95f, 0.0f, 0.0f };
     }
 
     [[nodiscard]]
@@ -767,6 +864,107 @@ namespace
         }
     }
 
+    void DrawRayFan(
+        SandboxState& state,
+        const Actor* selected)
+    {
+        if (!state.ShowRays)
+        {
+            return;
+        }
+
+        const Vec3f origin =
+            selected && ActorAlive(state, *selected)
+                ? ActorPosition(state, *selected)
+                : Vec3f{ 0.0f, 4.0f, 0.0f };
+
+        const ColliderID ignoredCollider =
+            selected && ActorAlive(state, *selected)
+                ? selected->Collider
+                : InvalidColliderID;
+
+        DrawFilledCircle(
+            origin,
+            0.075f,
+            Color{ 1.0f, 0.86f, 0.20f, 1.0f },
+            Color{ 1.0f, 0.86f, 0.20f, 1.0f },
+            false);
+
+        for (int i = 0; i < RayFanCount; ++i)
+        {
+            const float fraction =
+                RayFanCount == 1 ? 0.5f : static_cast<float>(i) / static_cast<float>(RayFanCount - 1);
+
+            const float angle =
+                state.RayAngle + (fraction - 0.5f) * RayFanSpread;
+
+            const Vec3f direction =
+                SafeNormalize(Vec3f{ std::cos(angle), std::sin(angle), 0.0f }, Vec3f::UnitX());
+
+            const std::vector<PhysicsRayHit> hits =
+                state.World.RaycastAll(
+                    origin,
+                    direction,
+                    RayMaxDistance,
+                    0xFFFF'FFFFu,
+                    ignoredCollider);
+
+            const Vec3f end =
+                hits.empty()
+                    ? origin + direction * RayMaxDistance
+                    : hits.front().Point;
+
+            DrawLine(
+                origin,
+                end,
+                hits.empty()
+                    ? Color{ 1.0f, 0.78f, 0.16f, 0.30f }
+                    : Color{ 1.0f, 0.85f, 0.20f, 0.70f },
+                hits.empty() ? 1.0f : 2.0f);
+
+            const std::size_t markerCount =
+                std::min<std::size_t>(hits.size(), 3u);
+
+            for (std::size_t hitIndex = 0; hitIndex < markerCount; ++hitIndex)
+            {
+                const PhysicsRayHit& hit =
+                    hits.at(hitIndex);
+
+                DrawFilledCircle(
+                    hit.Point,
+                    hitIndex == 0 ? 0.060f : 0.040f,
+                    hit.IsTrigger
+                        ? Color{ 0.24f, 1.0f, 0.70f, 0.90f }
+                        : Color{ 1.0f, 0.38f, 0.18f, 0.95f },
+                    Color{ 0.08f, 0.06f, 0.03f, 1.0f },
+                    false);
+            }
+
+            if (!hits.empty())
+            {
+                const PhysicsRayHit& first =
+                    hits.front();
+
+                DrawLine(
+                    first.Point,
+                    first.Point + first.Normal * 0.38f,
+                    Color{ 1.0f, 0.16f, 0.12f, 0.95f },
+                    2.0f);
+
+                const Vec3f reflection =
+                    SafeNormalize(
+                        direction - first.Normal * (2.0f * Dot(direction, first.Normal)),
+                        direction);
+
+                DrawLine(
+                    first.Point,
+                    first.Point + reflection * 0.75f,
+                    Color{ 0.20f, 0.95f, 1.0f, 0.65f },
+                    1.5f);
+            }
+        }
+    }
+
     void Render(
         SandboxState& state,
         int width,
@@ -833,6 +1031,8 @@ namespace
                 DrawVelocity(state, actor);
             }
         }
+
+        DrawRayFan(state, selected);
 
         for (const DebugContact& contact : state.World.DebugContacts())
         {
@@ -1049,9 +1249,10 @@ namespace
         std::snprintf(
             title,
             sizeof(title),
-            "KairoPhysics Playground | %s | gravity %s | selected %u %s | dynamic %zu | contacts %zu events %zu | 1 sphere 2 box 3 stack Delete remove C clear Tab next [ previous WASD/Arrows gentle push Shift+move Q/E torque Space pause N step R reset G gravity T debug",
+            "KairoPhysics Playground | %s | gravity %s | rays %s | selected %u %s | dynamic %zu | contacts %zu events %zu | 1 sphere 2 box 3 stack 4 collision L rays J/K rotate rays Delete remove C clear Tab next [ previous WASD/Arrows gentle push Shift+move Q/E torque Space pause N step R reset G gravity T debug",
             state.Paused ? "paused" : "running",
             state.GravityEnabled ? "on" : "off",
+            state.ShowRays ? "on" : "off",
             body,
             kind,
             activeCount,
@@ -1100,8 +1301,10 @@ int main()
     KeyLatch spawnSphere;
     KeyLatch spawnBox;
     KeyLatch spawnStack;
+    KeyLatch spawnCollision;
     KeyLatch remove;
     KeyLatch clear;
+    KeyLatch toggleRays;
     KeyLatch singleStep;
     KeyLatch mouseSelect;
 
@@ -1168,6 +1371,16 @@ int main()
             SpawnStack(state);
         }
 
+        if (spawnCollision.Pressed(KeyDown(window.get(), GLFW_KEY_4)))
+        {
+            SpawnCollisionDemo(state);
+        }
+
+        if (toggleRays.Pressed(KeyDown(window.get(), GLFW_KEY_L)))
+        {
+            state.ShowRays = !state.ShowRays;
+        }
+
         if (remove.Pressed(KeyDown(window.get(), GLFW_KEY_DELETE) || KeyDown(window.get(), GLFW_KEY_BACKSPACE)))
         {
             RemoveSelected(state);
@@ -1184,6 +1397,16 @@ int main()
         }
 
         MoveSelected(state, window.get(), std::min(elapsed, 1.0f / 30.0f));
+
+        if (KeyDown(window.get(), GLFW_KEY_J))
+        {
+            state.RayAngle += RayRotationSpeed * std::min(elapsed, 1.0f / 30.0f);
+        }
+
+        if (KeyDown(window.get(), GLFW_KEY_K))
+        {
+            state.RayAngle -= RayRotationSpeed * std::min(elapsed, 1.0f / 30.0f);
+        }
 
         const bool stepOnce =
             singleStep.Pressed(KeyDown(window.get(), GLFW_KEY_N));

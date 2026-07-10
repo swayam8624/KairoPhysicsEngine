@@ -41,6 +41,7 @@ GLFW playground controls:
 1                 add sphere
 2                 add box
 3                 add a small stack
+4                 launch two dynamic collision pairs
 Delete/Backspace  remove selected object
 C                 clear dynamic objects
 Tab               select next dynamic object
@@ -49,6 +50,8 @@ Left click         select nearest dynamic object
 Arrows/WASD        gently push selected object with force
 Shift+Arrows/WASD  slowly direct-move selected object
 Q/E               apply torque to selected object
+L                 toggle physics ray fan
+J/K               rotate ray fan around selected object
 Space             pause/resume
 N                 single fixed step while paused
 R                 reset playground
@@ -90,6 +93,7 @@ Baumgarte position correction with static-body protection
 Fixed timestep accumulator through PhysicsWorld::StepFixed
 Frame contact events: Begin, Stay, End
 Overlap queries: QueryAABB and QuerySphere
+Physics rays: Raycast nearest hit and RaycastAll sorted hit list
 Renderer-agnostic debug contacts and AABBs
 Terminal and GLFW debug sandboxes
 Catch2 regression tests
@@ -106,7 +110,7 @@ Broadphase           persistent KairoSpatial DynamicAABBTree pair generation
 Narrowphase          exact V1 contact generation and box SAT
 ContactSolver        warm-started sequential impulses and position correction
 PhysicsDebug         renderer-agnostic debug contacts and AABBs
-PhysicsWorld         ownership, fixed stepping, events, queries, sandbox-facing API
+PhysicsWorld         ownership, fixed stepping, events, overlap/raycast queries, sandbox-facing API
 ```
 
 Use the umbrella module:
