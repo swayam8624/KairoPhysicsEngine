@@ -42,7 +42,8 @@ export namespace kairo::foundation::physics
                 bodyA.ID,
                 bodyB.ID,
                 colliderA.ID,
-                colliderB.ID);
+                colliderB.ID,
+                colliderA.IsTrigger || colliderB.IsTrigger);
 
         const Vec3f centerA =
             WorldColliderCenter(bodyA, colliderA);
@@ -216,7 +217,8 @@ export namespace kairo::foundation::physics
                     bodyA.ID,
                     bodyB.ID,
                     colliderA.ID,
-                    colliderB.ID);
+                    colliderB.ID,
+                    colliderA.IsTrigger || colliderB.IsTrigger);
 
             for (ContactPoint point : swapped->Points)
             {

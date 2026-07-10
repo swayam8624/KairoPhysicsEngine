@@ -106,6 +106,46 @@ export namespace kairo::foundation::physics
             RemoveCachedContactsForCollider(collider);
         }
 
+        /// Input: collider id plus category and collision masks.
+        /// Output: collider filter updated and broadphase proxy refreshed.
+        /// Task: implement commercial-style collision filtering where
+        /// `BelongsTo` describes what the collider is and `CollidesWith`
+        /// describes what categories it accepts.
+        void SetCollisionFilter(
+            ColliderID collider,
+            std::uint32_t belongsTo,
+            std::uint32_t collidesWith)
+        {
+            if (!IsValidCollider(collider))
+            {
+                throw std::out_of_range("SetCollisionFilter failed: collider id does not exist or is inactive.");
+            }
+
+            Collider& record =
+                m_Colliders.at(collider);
+
+            record.BelongsTo = belongsTo;
+            record.CollidesWith = collidesWith;
+            record.LayerMask = belongsTo;
+            m_Broadphase.AddOrUpdateCollider(m_Bodies, record);
+        }
+
+        /// Input: collider id and trigger state.
+        /// Output: collider marked as solid or sensor.
+        /// Task: triggers still produce contact manifolds for gameplay/events,
+        /// but the solver skips their impulses and position correction.
+        void SetColliderTrigger(
+            ColliderID collider,
+            bool isTrigger)
+        {
+            if (!IsValidCollider(collider))
+            {
+                throw std::out_of_range("SetColliderTrigger failed: collider id does not exist or is inactive.");
+            }
+
+            m_Colliders.at(collider).IsTrigger = isTrigger;
+        }
+
         /// Input: active body id.
         /// Output: none.
         /// Task: deactivate a body and every collider attached to it without
@@ -579,6 +619,11 @@ export namespace kairo::foundation::physics
 
             for (const ContactManifold& manifold : m_LastContacts)
             {
+                if (manifold.IsTrigger)
+                {
+                    continue;
+                }
+
                 for (std::size_t pointIndex = 0; pointIndex < manifold.Points.size(); ++pointIndex)
                 {
                     const ContactPoint& point =

@@ -1,6 +1,7 @@
 module;
 
 #include <algorithm>
+#include <cstdint>
 #include <vector>
 
 export module Kairo.Foundation.PhysicsEngine.Broadphase;
@@ -38,6 +39,7 @@ export namespace kairo::foundation::physics
     struct BroadphaseProxy final
     {
         spatial::SpatialIndex Proxy = spatial::SpatialInvalidIndex;
+        std::uint32_t CategoryMask = 0u;
         bool InTree = false;
         bool Infinite = false;
     };
@@ -86,21 +88,30 @@ export namespace kairo::foundation::physics
             const spatial::SpatialAABB bounds =
                 WorldAABB(bodies.at(collider.Body), collider);
 
-            if (proxy.InTree)
+            const std::uint32_t categoryMask =
+                BroadphaseCategoryMask(collider);
+
+            if (proxy.InTree && proxy.CategoryMask == categoryMask)
             {
                 [[maybe_unused]] const bool reinserted =
                     m_Tree.Update(proxy.Proxy, bounds);
             }
             else
             {
+                if (proxy.InTree)
+                {
+                    m_Tree.Remove(proxy.Proxy);
+                }
+
                 proxy.Proxy =
                     m_Tree.Insert(
                         collider.ID,
                         bounds,
-                        collider.LayerMask);
+                        categoryMask);
                 proxy.InTree = true;
             }
 
+            proxy.CategoryMask = categoryMask;
             proxy.Infinite = false;
             RemoveInfinite(collider.ID);
         }
@@ -223,7 +234,7 @@ export namespace kairo::foundation::physics
                 IsActiveBody(bodies.at(ca.Body)) &&
                 IsActiveBody(bodies.at(cb.Body)) &&
                 ca.Body != cb.Body &&
-                (ca.LayerMask & cb.LayerMask) != 0u;
+                CollisionFiltersAllow(ca, cb);
         }
 
         static void SortUnique(

@@ -132,6 +132,27 @@ TEST_CASE("Persistent broadphase updates moved colliders and excludes same-body 
     REQUIRE(pairs[1].B == 2);
 }
 
+TEST_CASE("Broadphase respects belongs-to and collides-with filters", "[PhysicsEngine][Broadphase]")
+{
+    std::vector<RigidBody> bodies;
+    bodies.push_back(MakeRigidBody(0, DynamicSphereBody(Vec3f{ 0.0f, 0.5f, 0.0f })));
+    bodies.push_back(MakeRigidBody(1, DynamicSphereBody(Vec3f{ 0.6f, 0.5f, 0.0f })));
+
+    std::vector<Collider> colliders;
+    colliders.push_back(MakeCollider(0, 0, SphereCollider{ 0.5f }));
+    colliders.push_back(MakeCollider(1, 1, SphereCollider{ 0.5f }));
+
+    colliders[0].BelongsTo = 0b0001u;
+    colliders[0].CollidesWith = 0b0100u;
+    colliders[1].BelongsTo = 0b0010u;
+    colliders[1].CollidesWith = 0b0001u;
+
+    REQUIRE(ComputeBroadphasePairs(bodies, colliders).empty());
+
+    colliders[0].CollidesWith = 0b0010u;
+    REQUIRE(ComputeBroadphasePairs(bodies, colliders).size() == 1);
+}
+
 TEST_CASE("Narrowphase creates sphere and plane contacts", "[PhysicsEngine][Narrowphase]")
 {
     const RigidBody sphereBody =
@@ -153,6 +174,35 @@ TEST_CASE("Narrowphase creates sphere and plane contacts", "[PhysicsEngine][Narr
     REQUIRE(contact->Points.size() == 1);
     REQUIRE(contact->Points[0].PenetrationDepth == Catch::Approx(0.1f));
     REQUIRE(contact->Points[0].Normal.y == Catch::Approx(-1.0f));
+}
+
+TEST_CASE("Trigger contacts are reported but not solved", "[PhysicsEngine][Narrowphase][Solver]")
+{
+    std::vector<RigidBody> bodies;
+    bodies.push_back(MakeRigidBody(0, DynamicSphereBody(Vec3f{ 0.0f, 0.4f, 0.0f })));
+    bodies.push_back(MakeRigidBody(1, StaticBody()));
+    bodies[0].State.LinearVelocity = Vec3f{ 0.0f, -2.0f, 0.0f };
+
+    std::vector<Collider> colliders;
+    colliders.push_back(MakeCollider(0, 0, SphereCollider{ 0.5f }));
+    colliders.push_back(MakeCollider(1, 1, PlaneCollider{ Vec3f::Up(), 0.0f }));
+    colliders[1].IsTrigger = true;
+
+    const auto contact =
+        CollidePair(bodies[0], colliders[0], bodies[1], colliders[1]);
+
+    REQUIRE(contact.has_value());
+    REQUIRE(contact->IsTrigger);
+
+    std::vector<ContactManifold> contacts{ *contact };
+    PhysicsStepSettings settings;
+    settings.Baumgarte = 0.0f;
+
+    SolveContacts(bodies, colliders, contacts, settings, 1.0f / 60.0f);
+    CorrectPositions(bodies, contacts, settings);
+
+    REQUIRE(bodies[0].State.LinearVelocity.y == Catch::Approx(-2.0f));
+    REQUIRE(bodies[0].State.Position.y == Catch::Approx(0.4f));
 }
 
 TEST_CASE("Contact solver reverses closing normal velocity", "[PhysicsEngine][Solver]")

@@ -44,6 +44,9 @@ export namespace kairo::foundation::physics
         Vec3f LocalCenter = Vec3f::Zero();
         ColliderShape Shape = SphereCollider{};
         PhysicsMaterial Material;
+        std::uint32_t BelongsTo = 1u;
+        std::uint32_t CollidesWith = 0xFFFF'FFFFu;
+        bool IsTrigger = false;
         std::uint32_t LayerMask = 1u;
     };
 
@@ -69,6 +72,30 @@ export namespace kairo::foundation::physics
         return collider.Active &&
             collider.ID != InvalidColliderID &&
             collider.Body != InvalidBodyID;
+    }
+
+    /// Input: two colliders.
+    /// Output: true when their category masks allow narrowphase testing.
+    /// Task: implement the standard "belongs to / collides with" filter while
+    /// keeping the older `LayerMask` field as a broadphase category hint.
+    [[nodiscard]]
+    inline bool CollisionFiltersAllow(
+        const Collider& a,
+        const Collider& b) noexcept
+    {
+        return (a.CollidesWith & b.BelongsTo) != 0u &&
+            (b.CollidesWith & a.BelongsTo) != 0u;
+    }
+
+    /// Input: collider.
+    /// Output: broadphase category mask passed to KairoSpatial.
+    /// Task: prefer the explicit category field while preserving V1 LayerMask
+    /// compatibility for callers that still mutate it directly.
+    [[nodiscard]]
+    inline std::uint32_t BroadphaseCategoryMask(
+        const Collider& collider) noexcept
+    {
+        return collider.BelongsTo != 0u ? collider.BelongsTo : collider.LayerMask;
     }
 
     /// Input: body and collider.
@@ -139,6 +166,6 @@ export namespace kairo::foundation::physics
             plane->Normal = SafeNormalize(plane->Normal, Vec3f::Up());
         }
 
-        return { id, true, body, localCenter, shape, material, 1u };
+        return { id, true, body, localCenter, shape, material, 1u, 0xFFFF'FFFFu, false, 1u };
     }
 }

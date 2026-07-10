@@ -31,6 +31,11 @@ export namespace kairo::foundation::physics
         const PhysicsStepSettings& settings,
         float dt)
     {
+        if (manifold.IsTrigger)
+        {
+            return;
+        }
+
         if (manifold.BodyA >= bodies.size() || manifold.BodyB >= bodies.size())
         {
             return;
@@ -245,6 +250,11 @@ export namespace kairo::foundation::physics
     {
         for (ContactManifold& manifold : contacts)
         {
+            if (manifold.IsTrigger)
+            {
+                continue;
+            }
+
             if (manifold.BodyA >= bodies.size() || manifold.BodyB >= bodies.size())
             {
                 continue;
@@ -363,6 +373,11 @@ export namespace kairo::foundation::physics
         {
             for (const ContactManifold& manifold : contacts)
             {
+                if (manifold.IsTrigger)
+                {
+                    continue;
+                }
+
                 if (manifold.BodyA >= bodies.size() || manifold.BodyB >= bodies.size())
                 {
                     continue;
