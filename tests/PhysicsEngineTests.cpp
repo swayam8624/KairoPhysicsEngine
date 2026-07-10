@@ -102,7 +102,7 @@ TEST_CASE("Contact solver reverses closing normal velocity", "[PhysicsEngine][So
     colliders.push_back(MakeCollider(1, 1, PlaneCollider{ Vec3f::Up(), 0.0f }, material));
 
     ContactManifold manifold =
-        MakeContactManifold(0, 1);
+        MakeContactManifold(0, 1, 0, 1);
     manifold.Points.push_back(
         MakeContactPoint(
             Vec3f{ 0.0f, 0.0f, 0.0f },
@@ -116,6 +116,42 @@ TEST_CASE("Contact solver reverses closing normal velocity", "[PhysicsEngine][So
     SolveContacts(bodies, colliders, { manifold }, settings, 1.0f / 60.0f);
 
     REQUIRE(bodies[0].State.LinearVelocity.y >= Catch::Approx(0.0f).margin(1.0e-4f));
+}
+
+TEST_CASE("Contact solver uses exact collider material ids", "[PhysicsEngine][Solver]")
+{
+    std::vector<RigidBody> bodies;
+    bodies.push_back(MakeRigidBody(0, DynamicSphereBody(Vec3f{ 0.0f, 0.4f, 0.0f })));
+    bodies.push_back(MakeRigidBody(1, StaticBody()));
+    bodies[0].State.LinearVelocity = Vec3f{ 0.0f, -2.0f, 0.0f };
+
+    PhysicsMaterial dull;
+    dull.Restitution = 0.0f;
+
+    PhysicsMaterial bouncy;
+    bouncy.Restitution = 1.0f;
+
+    std::vector<Collider> colliders;
+    colliders.push_back(MakeCollider(0, 0, SphereCollider{ 0.25f }, dull, Vec3f{ 10.0f, 0.0f, 0.0f }));
+    colliders.push_back(MakeCollider(1, 0, SphereCollider{ 0.5f }, bouncy));
+    colliders.push_back(MakeCollider(2, 1, PlaneCollider{ Vec3f::Up(), 0.0f }, bouncy));
+
+    ContactManifold manifold =
+        MakeContactManifold(0, 1, 1, 2);
+
+    manifold.Points.push_back(
+        MakeContactPoint(
+            Vec3f{ 0.0f, 0.0f, 0.0f },
+            Vec3f{ 0.0f, -1.0f, 0.0f },
+            0.1f));
+
+    PhysicsStepSettings settings;
+    settings.VelocityIterations = 1;
+    settings.Baumgarte = 0.0f;
+
+    SolveContacts(bodies, colliders, { manifold }, settings, 1.0f / 60.0f);
+
+    REQUIRE(bodies[0].State.LinearVelocity.y == Catch::Approx(2.0f).margin(1.0e-4f));
 }
 
 TEST_CASE("PhysicsWorld settles falling sphere against plane", "[PhysicsEngine][World]")

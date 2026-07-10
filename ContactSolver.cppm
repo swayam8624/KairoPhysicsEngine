@@ -28,35 +28,31 @@ export namespace kairo::foundation::physics
         const PhysicsStepSettings& settings,
         float dt)
     {
-        if (manifold.A >= bodies.size() || manifold.B >= bodies.size())
+        if (manifold.BodyA >= bodies.size() || manifold.BodyB >= bodies.size())
         {
             return;
         }
 
         RigidBody& bodyA =
-            bodies.at(manifold.A);
+            bodies.at(manifold.BodyA);
 
         RigidBody& bodyB =
-            bodies.at(manifold.B);
+            bodies.at(manifold.BodyB);
 
         if (!IsDynamic(bodyA) && !IsDynamic(bodyB))
         {
             return;
         }
 
-        const Collider* colliderA = nullptr;
-        const Collider* colliderB = nullptr;
-        for (const Collider& collider : colliders)
-        {
-            if (collider.Body == manifold.A && !colliderA)
-            {
-                colliderA = &collider;
-            }
-            if (collider.Body == manifold.B && !colliderB)
-            {
-                colliderB = &collider;
-            }
-        }
+        const Collider* colliderA =
+            manifold.ColliderA < colliders.size()
+                ? &colliders.at(manifold.ColliderA)
+                : nullptr;
+
+        const Collider* colliderB =
+            manifold.ColliderB < colliders.size()
+                ? &colliders.at(manifold.ColliderB)
+                : nullptr;
 
         const PhysicsMaterial materialA =
             colliderA ? colliderA->Material : PhysicsMaterial{};
@@ -213,13 +209,13 @@ export namespace kairo::foundation::physics
     {
         for (const ContactManifold& manifold : contacts)
         {
-            if (manifold.A >= bodies.size() || manifold.B >= bodies.size())
+            if (manifold.BodyA >= bodies.size() || manifold.BodyB >= bodies.size())
             {
                 continue;
             }
 
-            RigidBody& bodyA = bodies.at(manifold.A);
-            RigidBody& bodyB = bodies.at(manifold.B);
+            RigidBody& bodyA = bodies.at(manifold.BodyA);
+            RigidBody& bodyB = bodies.at(manifold.BodyB);
             const float inverseMassSum =
                 bodyA.Mass.InverseMass + bodyB.Mass.InverseMass;
 

@@ -30,7 +30,11 @@ export namespace kairo::foundation::physics
         const Collider& colliderB)
     {
         ContactManifold manifold =
-            MakeContactManifold(bodyA.ID, bodyB.ID);
+            MakeContactManifold(
+                bodyA.ID,
+                bodyB.ID,
+                colliderA.ID,
+                colliderB.ID);
 
         const Vec3f centerA =
             WorldColliderCenter(bodyA, colliderA);
@@ -200,7 +204,11 @@ export namespace kairo::foundation::physics
             }
 
             ContactManifold result =
-                MakeContactManifold(bodyA.ID, bodyB.ID);
+                MakeContactManifold(
+                    bodyA.ID,
+                    bodyB.ID,
+                    colliderA.ID,
+                    colliderB.ID);
 
             for (ContactPoint point : swapped->Points)
             {
