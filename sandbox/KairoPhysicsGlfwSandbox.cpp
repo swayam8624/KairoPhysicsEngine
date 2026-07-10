@@ -2,6 +2,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -130,6 +131,8 @@ namespace
         bool GravityEnabled = true;
         bool ShowRays = true;
         float RayAngle = 0.0f;
+        std::uint32_t CallbackEvents = 0;
+        std::uint32_t TriggerCallbackEvents = 0;
         int SpawnIndex = 0;
     };
 
@@ -280,6 +283,11 @@ namespace
         const ColliderID collider =
             state.World.AddCollider(body, SphereCollider{ radius }, BouncyMaterial());
 
+        state.World.SetCollisionFilter(
+            collider,
+            CollisionLayer::DynamicWorld,
+            CollisionLayer::All);
+
         state.Actors.push_back(
             Actor
             {
@@ -310,6 +318,11 @@ namespace
 
         const ColliderID collider =
             state.World.AddCollider(body, BoxCollider{ halfExtents }, BouncyMaterial());
+
+        state.World.SetCollisionFilter(
+            collider,
+            CollisionLayer::DynamicWorld,
+            CollisionLayer::All);
 
         state.Actors.push_back(
             Actor
@@ -343,6 +356,11 @@ namespace
         const ColliderID collider =
             state.World.AddCollider(body, BoxCollider{ halfExtents }, GroundMaterial());
 
+        state.World.SetCollisionFilter(
+            collider,
+            CollisionLayer::StaticWorld,
+            CollisionLayer::All);
+
         state.Actors.push_back(
             Actor
             {
@@ -370,6 +388,11 @@ namespace
 
         const ColliderID collider =
             state.World.AddCollider(body, BoxCollider{ halfExtents }, GroundMaterial());
+
+        state.World.SetCollisionFilter(
+            collider,
+            CollisionLayer::Trigger,
+            CollisionLayer::All);
 
         state.World.SetColliderTrigger(collider, true);
 
@@ -418,6 +441,27 @@ namespace
         state.World.Settings.PositionIterations = 8;
         state.World.Settings.SleepTime = 1.0f;
         state.World.Gravity = state.GravityEnabled ? DefaultGravity : Vec3f::Zero();
+        state.World.SetCollisionLayerResponse(
+            CollisionLayer::DynamicWorld,
+            CollisionLayer::StaticWorld,
+            CollisionResponse::Block);
+        state.World.SetCollisionLayerResponse(
+            CollisionLayer::DynamicWorld,
+            CollisionLayer::DynamicWorld,
+            CollisionResponse::Block);
+        state.World.SetCollisionLayerResponse(
+            CollisionLayer::DynamicWorld,
+            CollisionLayer::Trigger,
+            CollisionResponse::Trigger);
+        state.World.SetContactEventCallback(
+            [&state](const PhysicsContactEvent& event)
+            {
+                ++state.CallbackEvents;
+                if (event.Response == CollisionResponse::Trigger)
+                {
+                    ++state.TriggerCallbackEvents;
+                }
+            });
 
         AddStaticBox(state, Vec3f{ 0.0f, -0.25f, 0.0f }, Vec3f{ 8.65f, 0.25f, 0.5f }, 0.0f, Color{ 0.34f, 0.37f, 0.42f, 1.0f });
         AddStaticBox(state, Vec3f{ -8.65f, 3.85f, 0.0f }, Vec3f{ 0.30f, 4.35f, 0.5f }, 0.0f, Color{ 0.30f, 0.32f, 0.36f, 1.0f });
@@ -1249,7 +1293,7 @@ namespace
         std::snprintf(
             title,
             sizeof(title),
-            "KairoPhysics Playground | %s | gravity %s | rays %s | selected %u %s | dynamic %zu | contacts %zu events %zu | 1 sphere 2 box 3 stack 4 collision L rays J/K rotate rays Delete remove C clear Tab next [ previous WASD/Arrows gentle push Shift+move Q/E torque Space pause N step R reset G gravity T debug",
+            "KairoPhysics Playground | %s | gravity %s | rays %s | selected %u %s | dynamic %zu | contacts %zu events %zu callbacks %u trigger-cb %u | 1 sphere 2 box 3 stack 4 collision L rays J/K rotate rays Delete remove C clear Tab next [ previous WASD/Arrows gentle push Shift+move Q/E torque Space pause N step R reset G gravity T debug",
             state.Paused ? "paused" : "running",
             state.GravityEnabled ? "on" : "off",
             state.ShowRays ? "on" : "off",
@@ -1257,7 +1301,9 @@ namespace
             kind,
             activeCount,
             state.World.Contacts().size(),
-            state.World.ContactEvents().size());
+            state.World.ContactEvents().size(),
+            state.CallbackEvents,
+            state.TriggerCallbackEvents);
 
         glfwSetWindowTitle(window, title);
     }

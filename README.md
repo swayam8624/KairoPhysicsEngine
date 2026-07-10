@@ -83,6 +83,11 @@ Per-body gravity scale, damping, max velocity clamps, sleeping, and wake hooks
 Sphere, plane, AABB, and oriented BoxCollider shapes
 Collider local center and local rotation
 BelongsTo / CollidesWith collision filters
+Built-in CollisionLayer bits for player/projectile/trigger/sensor/cloth/fluid/particle categories
+CollisionResponse rules: Ignore, Trigger, Block
+Layer response table and collider-pair response overrides
+Runtime collision filter callback
+Synchronous Begin/Stay/End contact event callback
 Trigger/sensor contacts that report overlap without solver response
 Persistent KairoSpatial DynamicAABBTree broadphase
 Plane pairing for infinite plane colliders
@@ -110,7 +115,7 @@ Broadphase           persistent KairoSpatial DynamicAABBTree pair generation
 Narrowphase          exact V1 contact generation and box SAT
 ContactSolver        warm-started sequential impulses and position correction
 PhysicsDebug         renderer-agnostic debug contacts and AABBs
-PhysicsWorld         ownership, fixed stepping, events, overlap/raycast queries, sandbox-facing API
+PhysicsWorld         ownership, fixed stepping, events, collision response rules, overlap/raycast queries, sandbox-facing API
 ```
 
 Use the umbrella module:
@@ -143,7 +148,7 @@ for (int i = 0; i < 120; ++i)
 }
 ```
 
-## Filters And Triggers
+## Collision Rules And Callbacks
 
 Collision filtering is symmetric:
 
@@ -159,12 +164,79 @@ A.CollidesWith contains B.BelongsTo
 B.CollidesWith contains A.BelongsTo
 ```
 
-Triggers still generate `ContactManifold` records and contact events, but the
-solver skips warm starting, impulses, and position correction:
+That mask is the coarse broadphase gate. After narrowphase confirms an exact
+overlap, the world resolves a `CollisionResponse`:
+
+```text
+Ignore   no contact and no event
+Trigger  contact/event only, no solver impulse or position correction
+Block    contact/event plus solver response
+```
+
+Layer response example:
+
+```cpp
+world.SetColliderCollisionLayer(playerCollider, CollisionLayer::Player);
+world.SetColliderCollisionLayer(pickupCollider, CollisionLayer::Trigger);
+
+world.SetCollisionLayerResponse(
+    CollisionLayer::Player,
+    CollisionLayer::Trigger,
+    CollisionResponse::Trigger);
+```
+
+Pair response override example:
+
+```cpp
+world.SetCollisionPairResponse(
+    projectileCollider,
+    ownerCollider,
+    CollisionResponse::Ignore);
+```
+
+Runtime classification hook:
+
+```cpp
+world.SetCollisionFilterCallback(
+    [](const Collider& a, const Collider& b)
+    {
+        return ShouldOverlapOnly(a, b)
+            ? CollisionResponse::Trigger
+            : CollisionResponse::Block;
+    });
+```
+
+Contact callback:
+
+```cpp
+world.SetContactEventCallback(
+    [](const PhysicsContactEvent& event)
+    {
+        if (event.Type == PhysicsContactEventType::Begin &&
+            event.Response == CollisionResponse::Trigger)
+        {
+            // pickup, sensor enter, laser volume, area trigger, etc.
+        }
+    });
+```
+
+Response resolution order is deterministic:
+
+```text
+1. explicit collider-pair response
+2. runtime collision filter callback
+3. layer response table
+4. default mask/trigger behavior
+```
+
+The old trigger flag remains as a simple default:
 
 ```cpp
 world.SetColliderTrigger(sensorCollider, true);
 ```
+
+Triggers still generate `ContactManifold` records and contact events, but the
+solver skips warm starting, impulses, and position correction.
 
 ## Contact Convention
 
@@ -187,6 +259,10 @@ Begin
 Stay
 End
 ```
+
+The same events can be consumed through `SetContactEventCallback`. The callback
+payload contains body ids, collider ids, trigger state, final response, and event
+type.
 
 Scene queries intentionally return collider ids, not engine-owned references:
 
@@ -213,3 +289,21 @@ Full editor/ImGui tooling
 ```
 
 Those belong to later engine phases, not `KairoPhysicsMath`.
+
+## Physics Roadmap
+
+The rigid body engine now has the filtering, response, query, and callback
+surface needed before larger physics families are added. The next families
+should be separate modules that reuse the same world/query/event conventions:
+
+```text
+KairoParticles      particle emitters, forces, constraints, collision events
+KairoCloth          mass-spring or XPBD cloth, cloth collision, tearing later
+KairoFluids         SPH or grid fluids, buoyancy, surface interaction
+KairoDestruction    fracture pieces, debris, sleeping/island integration
+KairoVehicles       raycast wheels, suspension, tire friction curves
+```
+
+The near-term rule is not to fake those systems inside rigid bodies. Each one
+should land with tests, documentation, sandbox demos, and clear integration
+points.
