@@ -23,6 +23,17 @@ namespace
         return desc;
     }
 
+    RigidBodyDesc DynamicBoxBody(
+        const Vec3f& position,
+        const Vec3f& halfExtents = Vec3f{ 0.5f, 0.5f, 0.5f })
+    {
+        RigidBodyDesc desc;
+        desc.Type = BodyType::Dynamic;
+        desc.State.Position = position;
+        desc.Mass = BoxMassProperties(halfExtents, 1.0f);
+        return desc;
+    }
+
     RigidBodyDesc StaticBody(
         const Vec3f& position = Vec3f::Zero())
     {
@@ -455,6 +466,93 @@ TEST_CASE("PhysicsWorld settles falling sphere against plane", "[PhysicsEngine][
     REQUIRE(world.DebugAABBs().size() == 1);
 }
 
+TEST_CASE("PhysicsWorld resolves dynamic object collisions", "[PhysicsEngine][World]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+    world.Settings.VelocityIterations = 12;
+    world.Settings.PositionIterations = 6;
+
+    RigidBodyDesc leftDesc =
+        DynamicSphereBody(Vec3f{ -0.65f, 1.0f, 0.0f }, 0.5f);
+
+    RigidBodyDesc rightDesc =
+        DynamicSphereBody(Vec3f{ 0.65f, 1.0f, 0.0f }, 0.5f);
+
+    leftDesc.EnableGravity = false;
+    rightDesc.EnableGravity = false;
+    leftDesc.State.LinearVelocity = Vec3f{ 2.0f, 0.0f, 0.0f };
+    rightDesc.State.LinearVelocity = Vec3f{ -2.0f, 0.0f, 0.0f };
+
+    const BodyID left =
+        world.CreateRigidBody(leftDesc);
+
+    const BodyID right =
+        world.CreateRigidBody(rightDesc);
+
+    PhysicsMaterial bouncy;
+    bouncy.Restitution = 1.0f;
+    bouncy.StaticFriction = 0.0f;
+    bouncy.DynamicFriction = 0.0f;
+
+    [[maybe_unused]] const ColliderID leftCollider =
+        world.AddCollider(left, SphereCollider{ 0.5f }, bouncy);
+
+    [[maybe_unused]] const ColliderID rightCollider =
+        world.AddCollider(right, SphereCollider{ 0.5f }, bouncy);
+
+    bool contacted =
+        false;
+
+    for (int i = 0; i < 24; ++i)
+    {
+        world.Step(1.0f / 60.0f);
+        contacted =
+            contacted || !world.Contacts().empty();
+    }
+
+    REQUIRE(contacted);
+    REQUIRE(world.Bodies()[left].State.Position.x < world.Bodies()[right].State.Position.x);
+    REQUIRE(world.Bodies()[right].State.Position.x - world.Bodies()[left].State.Position.x >= 0.95f);
+}
+
+TEST_CASE("PhysicsWorld resolves dynamic sphere box collisions", "[PhysicsEngine][World]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+    world.Settings.VelocityIterations = 12;
+    world.Settings.PositionIterations = 8;
+
+    RigidBodyDesc sphereDesc =
+        DynamicSphereBody(Vec3f{ -0.35f, 1.0f, 0.0f }, 0.5f);
+
+    RigidBodyDesc boxDesc =
+        DynamicBoxBody(Vec3f{ 0.35f, 1.0f, 0.0f }, Vec3f{ 0.45f, 0.45f, 0.5f });
+
+    sphereDesc.EnableGravity = false;
+    boxDesc.EnableGravity = false;
+
+    const BodyID sphere =
+        world.CreateRigidBody(sphereDesc);
+
+    const BodyID box =
+        world.CreateRigidBody(boxDesc);
+
+    [[maybe_unused]] const ColliderID sphereCollider =
+        world.AddCollider(sphere, SphereCollider{ 0.5f });
+
+    [[maybe_unused]] const ColliderID boxCollider =
+        world.AddCollider(box, BoxCollider{ Vec3f{ 0.45f, 0.45f, 0.5f } });
+
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(!world.Contacts().empty());
+    REQUIRE(world.Bodies()[sphere].State.Position.x < -0.35f);
+    REQUIRE(world.Bodies()[box].State.Position.x > 0.35f);
+}
+
 TEST_CASE("Kinematic bodies advance by authored velocity only", "[PhysicsEngine][World]")
 {
     PhysicsWorld world;
@@ -580,6 +678,70 @@ TEST_CASE("World overlap queries return active finite colliders", "[PhysicsEngin
     REQUIRE(aabbHits[0] == sphereCollider);
     REQUIRE(sphereHits.size() == 1);
     REQUIRE(sphereHits[0] == sphereCollider);
+}
+
+TEST_CASE("World raycasts return nearest and sorted collider hits", "[PhysicsEngine][World]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+
+    const BodyID nearBody =
+        world.CreateRigidBody(DynamicSphereBody(Vec3f{ 0.0f, 1.0f, 0.0f }, 0.5f));
+
+    const BodyID farBody =
+        world.CreateRigidBody(DynamicSphereBody(Vec3f{ 2.0f, 1.0f, 0.0f }, 0.5f));
+
+    const BodyID boxBody =
+        world.CreateRigidBody(DynamicBoxBody(Vec3f{ 4.0f, 1.0f, 0.0f }, Vec3f{ 0.5f, 0.5f, 0.5f }));
+
+    const ColliderID nearCollider =
+        world.AddCollider(nearBody, SphereCollider{ 0.5f });
+
+    const ColliderID farCollider =
+        world.AddCollider(farBody, SphereCollider{ 0.5f });
+
+    const ColliderID boxCollider =
+        world.AddCollider(boxBody, BoxCollider{ Vec3f{ 0.5f, 0.5f, 0.5f } });
+
+    const auto nearest =
+        world.Raycast(Vec3f{ -2.0f, 1.0f, 0.0f }, Vec3f::UnitX(), 8.0f);
+
+    REQUIRE(nearest.has_value());
+    REQUIRE(nearest->Collider == nearCollider);
+    REQUIRE(nearest->Distance == Catch::Approx(1.5f));
+    REQUIRE(nearest->Point.x == Catch::Approx(-0.5f));
+    REQUIRE(nearest->Normal.x == Catch::Approx(-1.0f));
+
+    const std::vector<PhysicsRayHit> allHits =
+        world.RaycastAll(Vec3f{ -2.0f, 1.0f, 0.0f }, Vec3f::UnitX(), 8.0f);
+
+    REQUIRE(allHits.size() == 3);
+    REQUIRE(allHits[0].Collider == nearCollider);
+    REQUIRE(allHits[1].Collider == farCollider);
+    REQUIRE(allHits[2].Collider == boxCollider);
+    REQUIRE(allHits[0].Distance < allHits[1].Distance);
+    REQUIRE(allHits[1].Distance < allHits[2].Distance);
+
+    const auto ignored =
+        world.Raycast(Vec3f{ -2.0f, 1.0f, 0.0f }, Vec3f::UnitX(), 8.0f, 0xFFFF'FFFFu, nearCollider);
+
+    REQUIRE(ignored.has_value());
+    REQUIRE(ignored->Collider == farCollider);
+}
+
+TEST_CASE("World raycasts validate inputs and respect max distance", "[PhysicsEngine][World][Validation]")
+{
+    PhysicsWorld world;
+
+    const BodyID body =
+        world.CreateRigidBody(DynamicSphereBody(Vec3f::Zero()));
+
+    [[maybe_unused]] const ColliderID collider =
+        world.AddCollider(body, SphereCollider{ 0.5f });
+
+    REQUIRE_THROWS_AS(world.Raycast(Vec3f::Zero(), Vec3f::Zero()), std::invalid_argument);
+    REQUIRE_THROWS_AS(world.Raycast(Vec3f::Zero(), Vec3f::UnitX(), 0.0f), std::invalid_argument);
+    REQUIRE_FALSE(world.Raycast(Vec3f{ -2.0f, 0.0f, 0.0f }, Vec3f::UnitX(), 1.0f).has_value());
 }
 
 TEST_CASE("World reports deterministic contact begin stay and end events", "[PhysicsEngine][World]")
