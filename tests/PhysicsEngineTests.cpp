@@ -178,6 +178,71 @@ TEST_CASE("Narrowphase creates sphere and plane contacts", "[PhysicsEngine][Narr
     REQUIRE(contact->Points[0].Normal.y == Catch::Approx(-1.0f));
 }
 
+TEST_CASE("Narrowphase keeps plane contact normals stable when pairs are swapped", "[PhysicsEngine][Narrowphase]")
+{
+    const RigidBody sphereBody =
+        MakeRigidBody(0, DynamicSphereBody(Vec3f{ 0.0f, 0.4f, 0.0f }));
+
+    const RigidBody planeBody =
+        MakeRigidBody(1, StaticBody());
+
+    const Collider sphere =
+        MakeCollider(0, 0, SphereCollider{ 0.5f });
+
+    const Collider plane =
+        MakeCollider(1, 1, PlaneCollider{ Vec3f::Up(), 0.0f });
+
+    const auto spherePlane =
+        CollidePair(sphereBody, sphere, planeBody, plane);
+
+    const auto planeSphere =
+        CollidePair(planeBody, plane, sphereBody, sphere);
+
+    REQUIRE(spherePlane.has_value());
+    REQUIRE(planeSphere.has_value());
+    REQUIRE(spherePlane->Points[0].Normal.y == Catch::Approx(-1.0f));
+    REQUIRE(planeSphere->Points[0].Normal.y == Catch::Approx(1.0f));
+
+    const RigidBody boxBody =
+        MakeRigidBody(2, StaticBody(Vec3f{ 0.0f, 0.4f, 0.0f }));
+
+    const Collider box =
+        MakeCollider(2, 2, AABBCollider{ Vec3f{ 0.5f, 0.5f, 0.5f } });
+
+    const auto boxPlane =
+        CollidePair(boxBody, box, planeBody, plane);
+
+    const auto planeBox =
+        CollidePair(planeBody, plane, boxBody, box);
+
+    REQUIRE(boxPlane.has_value());
+    REQUIRE(planeBox.has_value());
+    REQUIRE(boxPlane->Points[0].Normal.y == Catch::Approx(-1.0f));
+    REQUIRE(planeBox->Points[0].Normal.y == Catch::Approx(1.0f));
+}
+
+TEST_CASE("Sphere sphere contact point is midpoint of surface points", "[PhysicsEngine][Narrowphase]")
+{
+    const RigidBody a =
+        MakeRigidBody(0, DynamicSphereBody(Vec3f::Zero()));
+
+    const RigidBody b =
+        MakeRigidBody(1, DynamicSphereBody(Vec3f{ 0.75f, 0.0f, 0.0f }));
+
+    const Collider ca =
+        MakeCollider(0, 0, SphereCollider{ 0.5f });
+
+    const Collider cb =
+        MakeCollider(1, 1, SphereCollider{ 0.5f });
+
+    const auto contact =
+        CollidePair(a, ca, b, cb);
+
+    REQUIRE(contact.has_value());
+    REQUIRE(contact->Points[0].Position.x == Catch::Approx(0.375f));
+    REQUIRE(contact->Points[0].Normal.x == Catch::Approx(1.0f));
+}
+
 TEST_CASE("Trigger contacts are reported but not solved", "[PhysicsEngine][Narrowphase][Solver]")
 {
     std::vector<RigidBody> bodies;
@@ -274,6 +339,40 @@ TEST_CASE("Contact solver uses exact collider material ids", "[PhysicsEngine][So
     SolveContacts(bodies, colliders, contacts, settings, 1.0f / 60.0f);
 
     REQUIRE(bodies[0].State.LinearVelocity.y == Catch::Approx(2.0f).margin(1.0e-4f));
+}
+
+TEST_CASE("Contact friction reduces tangential velocity", "[PhysicsEngine][Solver]")
+{
+    std::vector<RigidBody> bodies;
+    bodies.push_back(MakeRigidBody(0, DynamicSphereBody(Vec3f{ 0.0f, 0.4f, 0.0f })));
+    bodies.push_back(MakeRigidBody(1, StaticBody()));
+    bodies[0].State.LinearVelocity = Vec3f{ 2.0f, -1.0f, 0.0f };
+
+    PhysicsMaterial material;
+    material.Restitution = 0.0f;
+    material.DynamicFriction = 1.0f;
+
+    std::vector<Collider> colliders;
+    colliders.push_back(MakeCollider(0, 0, SphereCollider{ 0.5f }, material));
+    colliders.push_back(MakeCollider(1, 1, PlaneCollider{ Vec3f::Up(), 0.0f }, material));
+
+    ContactManifold manifold =
+        MakeContactManifold(0, 1, 0, 1);
+
+    manifold.Points.push_back(
+        MakeContactPoint(
+            Vec3f{ 0.0f, 0.0f, 0.0f },
+            Vec3f{ 0.0f, -1.0f, 0.0f },
+            0.1f));
+
+    PhysicsStepSettings settings;
+    settings.VelocityIterations = 8;
+    settings.Baumgarte = 0.0f;
+
+    std::vector<ContactManifold> contacts{ manifold };
+    SolveContacts(bodies, colliders, contacts, settings, 1.0f / 60.0f);
+
+    REQUIRE(std::abs(bodies[0].State.LinearVelocity.x) < 2.0f);
 }
 
 TEST_CASE("Warm starting applies cached normal impulses", "[PhysicsEngine][Solver]")
@@ -514,6 +613,45 @@ TEST_CASE("World reports deterministic contact begin stay and end events", "[Phy
 
     REQUIRE(world.ContactEvents().size() == 1);
     REQUIRE(world.ContactEvents()[0].Type == PhysicsContactEventType::End);
+}
+
+TEST_CASE("Fixed stepping is deterministic for replay-equivalent worlds", "[PhysicsEngine][World]")
+{
+    auto makeWorld = []
+    {
+        PhysicsWorld world;
+        world.Settings.EnableSleeping = false;
+
+        const BodyID sphere =
+            world.CreateRigidBody(DynamicSphereBody(Vec3f{ 0.0f, 2.0f, 0.0f }));
+
+        const BodyID floor =
+            world.CreateRigidBody(StaticBody());
+
+        [[maybe_unused]] const ColliderID sphereCollider =
+            world.AddCollider(sphere, SphereCollider{ 0.5f });
+
+        [[maybe_unused]] const ColliderID floorCollider =
+            world.AddCollider(floor, PlaneCollider{ Vec3f::Up(), 0.0f });
+
+        return world;
+    };
+
+    PhysicsWorld a =
+        makeWorld();
+
+    PhysicsWorld b =
+        makeWorld();
+
+    for (int i = 0; i < 120; ++i)
+    {
+        a.Step(1.0f / 60.0f);
+        b.Step(1.0f / 60.0f);
+    }
+
+    REQUIRE(a.Bodies()[0].State.Position.x == Catch::Approx(b.Bodies()[0].State.Position.x));
+    REQUIRE(a.Bodies()[0].State.Position.y == Catch::Approx(b.Bodies()[0].State.Position.y));
+    REQUIRE(a.Bodies()[0].State.LinearVelocity.y == Catch::Approx(b.Bodies()[0].State.LinearVelocity.y));
 }
 
 TEST_CASE("Fixed timestep accumulator advances deterministic substeps", "[PhysicsEngine][World]")
