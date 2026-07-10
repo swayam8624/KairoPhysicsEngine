@@ -60,6 +60,118 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    inline Vec3f ClosestPointOnBox(
+        const OrientedBoxFrame& box,
+        const Vec3f& point)
+    {
+        const Vec3f delta =
+            point - box.Center;
+
+        Vec3f closest =
+            box.Center;
+
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            const float distance =
+                std::clamp(
+                    Dot(delta, box.Axes[axis]),
+                    -BoxExtentAt(box.HalfExtents, axis),
+                    BoxExtentAt(box.HalfExtents, axis));
+
+            closest += box.Axes[axis] * distance;
+        }
+
+        return closest;
+    }
+
+    [[nodiscard]]
+    inline Vec3f SphereBoxFallbackNormal(
+        const OrientedBoxFrame& box,
+        const Vec3f& sphereCenter)
+    {
+        const Vec3f delta =
+            sphereCenter - box.Center;
+
+        float bestDistance =
+            std::numeric_limits<float>::max();
+
+        Vec3f bestNormal =
+            box.Axes[0];
+
+        for (std::size_t axis = 0; axis < 3; ++axis)
+        {
+            const float local =
+                Dot(delta, box.Axes[axis]);
+
+            const float faceDistance =
+                BoxExtentAt(box.HalfExtents, axis) - std::abs(local);
+
+            if (faceDistance < bestDistance)
+            {
+                bestDistance = faceDistance;
+                bestNormal = local >= 0.0f ? box.Axes[axis] : -box.Axes[axis];
+            }
+        }
+
+        return SafeNormalize(bestNormal, Vec3f::UnitX());
+    }
+
+    [[nodiscard]]
+    inline std::optional<ContactPoint> MakeSphereBoxContact(
+        const Vec3f& sphereCenter,
+        float sphereRadius,
+        const OrientedBoxFrame& box,
+        bool normalFromSphereToBox)
+    {
+        const Vec3f closest =
+            ClosestPointOnBox(box, sphereCenter);
+
+        Vec3f delta =
+            closest - sphereCenter;
+
+        float distanceSq =
+            delta.LengthSquared();
+
+        Vec3f normalFromSphere =
+            Vec3f::UnitX();
+
+        float penetration =
+            0.0f;
+
+        if (distanceSq > 1.0e-10f)
+        {
+            if (distanceSq >= sphereRadius * sphereRadius)
+            {
+                return std::nullopt;
+            }
+
+            const float distance =
+                std::sqrt(distanceSq);
+
+            normalFromSphere = delta / distance;
+            penetration = sphereRadius - distance;
+        }
+        else
+        {
+            normalFromSphere =
+                -SphereBoxFallbackNormal(box, sphereCenter);
+
+            penetration = sphereRadius;
+        }
+
+        const Vec3f normal =
+            normalFromSphereToBox ? normalFromSphere : -normalFromSphere;
+
+        const Vec3f sphereSurface =
+            sphereCenter + normalFromSphere * sphereRadius;
+
+        return MakeContactPoint(
+            (sphereSurface + closest) * 0.5f,
+            normal,
+            penetration);
+    }
+
+    [[nodiscard]]
     inline bool TestBoxAxis(
         const OrientedBoxFrame& boxA,
         const OrientedBoxFrame& boxB,
@@ -226,6 +338,56 @@ export namespace kairo::foundation::physics
 
                 return manifold;
             }
+
+            if (const auto* boxB = std::get_if<BoxCollider>(&colliderB.Shape))
+            {
+                const OrientedBoxFrame frameB =
+                    WorldBoxFrame(bodyB, colliderB, boxB->HalfExtents);
+
+                const auto point =
+                    MakeSphereBoxContact(
+                        centerA,
+                        sphereA->Radius,
+                        frameB,
+                        true);
+
+                if (!point)
+                {
+                    return std::nullopt;
+                }
+
+                manifold.Points.push_back(*point);
+                return manifold;
+            }
+
+            if (const auto* boxB = std::get_if<AABBCollider>(&colliderB.Shape))
+            {
+                const OrientedBoxFrame frameB
+                {
+                    centerB,
+                    {
+                        Vec3f::UnitX(),
+                        Vec3f::UnitY(),
+                        Vec3f::UnitZ()
+                    },
+                    boxB->HalfExtents
+                };
+
+                const auto point =
+                    MakeSphereBoxContact(
+                        centerA,
+                        sphereA->Radius,
+                        frameB,
+                        true);
+
+                if (!point)
+                {
+                    return std::nullopt;
+                }
+
+                manifold.Points.push_back(*point);
+                return manifold;
+            }
         }
 
         if (const auto* planeA = std::get_if<PlaneCollider>(&colliderA.Shape))
@@ -284,6 +446,24 @@ export namespace kairo::foundation::physics
         {
             const OrientedBoxFrame frameA =
                 WorldBoxFrame(bodyA, colliderA, boxA->HalfExtents);
+
+            if (const auto* sphereB = std::get_if<SphereCollider>(&colliderB.Shape))
+            {
+                const auto point =
+                    MakeSphereBoxContact(
+                        centerB,
+                        sphereB->Radius,
+                        frameA,
+                        false);
+
+                if (!point)
+                {
+                    return std::nullopt;
+                }
+
+                manifold.Points.push_back(*point);
+                return manifold;
+            }
 
             if (const auto* boxB = std::get_if<BoxCollider>(&colliderB.Shape))
             {
@@ -344,6 +524,35 @@ export namespace kairo::foundation::physics
 
         if (const auto* boxA = std::get_if<AABBCollider>(&colliderA.Shape))
         {
+            if (const auto* sphereB = std::get_if<SphereCollider>(&colliderB.Shape))
+            {
+                const OrientedBoxFrame frameA
+                {
+                    centerA,
+                    {
+                        Vec3f::UnitX(),
+                        Vec3f::UnitY(),
+                        Vec3f::UnitZ()
+                    },
+                    boxA->HalfExtents
+                };
+
+                const auto point =
+                    MakeSphereBoxContact(
+                        centerB,
+                        sphereB->Radius,
+                        frameA,
+                        false);
+
+                if (!point)
+                {
+                    return std::nullopt;
+                }
+
+                manifold.Points.push_back(*point);
+                return manifold;
+            }
+
             if (const auto* boxB = std::get_if<AABBCollider>(&colliderB.Shape))
             {
                 const Vec3f delta =

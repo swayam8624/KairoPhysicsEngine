@@ -762,6 +762,40 @@ TEST_CASE("Rotated BoxCollider contacts planes through projected radius", "[Phys
     REQUIRE(contact->Points[0].Normal.y < 0.0f);
 }
 
+TEST_CASE("Sphere and BoxCollider contacts are detected in both pair orders", "[PhysicsEngine][Narrowphase]")
+{
+    const RigidBody sphereBody =
+        MakeRigidBody(0, DynamicSphereBody(Vec3f{ 0.0f, 0.85f, 0.0f }));
+
+    const RigidBody boxBody =
+        MakeRigidBody(1, StaticBody(Vec3f::Zero()));
+
+    const Collider sphere =
+        MakeCollider(0, 0, SphereCollider{ 0.5f });
+
+    const Collider box =
+        MakeCollider(
+            1,
+            1,
+            BoxCollider{ Vec3f{ 0.5f, 0.5f, 0.5f } },
+            {},
+            Vec3f::Zero(),
+            RotationAroundZ(0.2f));
+
+    const auto sphereBox =
+        CollidePair(sphereBody, sphere, boxBody, box);
+
+    const auto boxSphere =
+        CollidePair(boxBody, box, sphereBody, sphere);
+
+    REQUIRE(sphereBox.has_value());
+    REQUIRE(boxSphere.has_value());
+    REQUIRE(sphereBox->Points[0].PenetrationDepth > 0.0f);
+    REQUIRE(boxSphere->Points[0].PenetrationDepth > 0.0f);
+    REQUIRE(sphereBox->Points[0].Normal.y < 0.0f);
+    REQUIRE(boxSphere->Points[0].Normal.y > 0.0f);
+}
+
 TEST_CASE("Invalid world inputs throw", "[PhysicsEngine][Validation]")
 {
     PhysicsWorld world;
