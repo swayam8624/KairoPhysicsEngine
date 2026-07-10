@@ -35,13 +35,26 @@ Run the GLFW debug sandbox when GLFW/OpenGL are available:
 ./build/KairoPhysicsGlfwSandbox
 ```
 
-Viewer controls:
+GLFW playground controls:
 
 ```text
-Space  pause/resume
-R      reset scenario
-B      toggle sphere/box scenario
-Esc    close
+1                 add sphere
+2                 add box
+3                 add a small stack
+Delete/Backspace  remove selected object
+C                 clear dynamic objects
+Tab               select next dynamic object
+`                 select previous dynamic object
+Left click         select nearest dynamic object
+Arrows/WASD        push selected object with force
+Shift+Arrows/WASD  directly move selected object
+Q/E               apply torque to selected object
+Space             pause/resume
+N                 single fixed step while paused
+R                 reset playground
+G                 toggle gravity
+T                 toggle AABB debug overlay
+Esc               close
 ```
 
 ## Dependency Resolution
@@ -70,7 +83,7 @@ BelongsTo / CollidesWith collision filters
 Trigger/sensor contacts that report overlap without solver response
 Persistent KairoSpatial DynamicAABBTree broadphase
 Plane pairing for infinite plane colliders
-Sphere-sphere, sphere-plane, AABB-AABB, AABB-plane, box-box SAT, and box-plane contacts
+Sphere-sphere, sphere-plane, sphere-box, AABB-AABB, AABB-plane, box-box SAT, and box-plane contacts
 Sequential impulse solver with warm-started normal/friction impulses
 Separate velocity and position solver iterations
 Baumgarte position correction with static-body protection
