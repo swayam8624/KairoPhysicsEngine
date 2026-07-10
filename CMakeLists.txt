@@ -56,6 +56,15 @@ target_sources(KairoPhysicsEngine
         FILE_SET CXX_MODULES
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}
         FILES
+            PhysicsEngineTypes.cppm
+            PhysicsMaterial.cppm
+            RigidBody.cppm
+            Collider.cppm
+            Broadphase.cppm
+            Narrowphase.cppm
+            ContactSolver.cppm
+            PhysicsDebug.cppm
+            PhysicsWorld.cppm
             KairoPhysicsEngine.cppm
 )
 

@@ -1,0 +1,129 @@
+module;
+
+#include <variant>
+
+export module Kairo.Foundation.PhysicsEngine.Collider;
+
+import Kairo.Foundation.Math.Vector;
+import Kairo.Foundation.Geometry.Sphere;
+import Kairo.Foundation.Geometry.Plane;
+import Kairo.Foundation.Geometry.AABB;
+import Kairo.Foundation.PhysicsMath;
+import Kairo.Foundation.PhysicsEngine.Material;
+import Kairo.Foundation.PhysicsEngine.RigidBody;
+
+export namespace kairo::foundation::physics
+{
+    using namespace kairo::foundation::math;
+    using namespace kairo::foundation::geometry;
+
+    struct SphereCollider final
+    {
+        float Radius = 0.5f;
+    };
+
+    struct PlaneCollider final
+    {
+        Vec3f Normal = Vec3f::Up();
+        float Distance = 0.0f;
+    };
+
+    struct AABBCollider final
+    {
+        Vec3f HalfExtents = Vec3f{ 0.5f, 0.5f, 0.5f };
+    };
+
+    using ColliderShape =
+        std::variant<SphereCollider, PlaneCollider, AABBCollider>;
+
+    struct Collider final
+    {
+        ColliderID ID = InvalidColliderID;
+        BodyID Body = InvalidBodyID;
+        Vec3f LocalCenter = Vec3f::Zero();
+        ColliderShape Shape = SphereCollider{};
+        PhysicsMaterial Material;
+        std::uint32_t LayerMask = 1u;
+    };
+
+    /// Input: collider.
+    /// Output: true when the collider is infinite and should not enter an AABB tree.
+    /// Task: planes are tested against finite colliders explicitly by broadphase.
+    [[nodiscard]]
+    inline bool IsInfiniteCollider(
+        const Collider& collider) noexcept
+    {
+        return std::holds_alternative<PlaneCollider>(collider.Shape);
+    }
+
+    /// Input: body and collider.
+    /// Output: collider center in world coordinates.
+    /// Task: apply V1 local-center offset. Local collider rotation is deferred.
+    [[nodiscard]]
+    inline Vec3f WorldColliderCenter(
+        const RigidBody& body,
+        const Collider& collider)
+    {
+        return body.State.Position + Rotate(body.State.Rotation, collider.LocalCenter);
+    }
+
+    /// Input: body and collider.
+    /// Output: world-space AABB for finite collider shapes.
+    /// Task: feed KairoSpatial broadphase with bounds derived from engine data.
+    [[nodiscard]]
+    inline AABBf WorldAABB(
+        const RigidBody& body,
+        const Collider& collider)
+    {
+        const Vec3f center =
+            WorldColliderCenter(body, collider);
+
+        if (const auto* sphere = std::get_if<SphereCollider>(&collider.Shape))
+        {
+            RequirePositive(sphere->Radius, "SphereCollider.Radius");
+            return AABBf::FromCenterExtent(
+                center,
+                Vec3f{ sphere->Radius, sphere->Radius, sphere->Radius });
+        }
+
+        if (const auto* box = std::get_if<AABBCollider>(&collider.Shape))
+        {
+            RequirePositiveComponents(box->HalfExtents, "AABBCollider.HalfExtents");
+            return AABBf::FromCenterExtent(center, box->HalfExtents);
+        }
+
+        return AABBf::Empty();
+    }
+
+    /// Input: collider id, body id, shape, material, and optional local center.
+    /// Output: validated collider record.
+    /// Task: provide a single construction path for `PhysicsWorld::AddCollider`.
+    [[nodiscard]]
+    inline Collider MakeCollider(
+        ColliderID id,
+        BodyID body,
+        ColliderShape shape,
+        PhysicsMaterial material = {},
+        const Vec3f& localCenter = Vec3f::Zero())
+    {
+        ValidatePhysicsMaterial(material);
+        RequireFinite(localCenter, "localCenter");
+
+        if (const auto* sphere = std::get_if<SphereCollider>(&shape))
+        {
+            RequirePositive(sphere->Radius, "SphereCollider.Radius");
+        }
+        else if (const auto* box = std::get_if<AABBCollider>(&shape))
+        {
+            RequirePositiveComponents(box->HalfExtents, "AABBCollider.HalfExtents");
+        }
+        else if (auto* plane = std::get_if<PlaneCollider>(&shape))
+        {
+            RequireFinite(plane->Normal, "PlaneCollider.Normal");
+            RequireFinite(plane->Distance, "PlaneCollider.Distance");
+            plane->Normal = SafeNormalize(plane->Normal, Vec3f::Up());
+        }
+
+        return { id, body, localCenter, shape, material, 1u };
+    }
+}
