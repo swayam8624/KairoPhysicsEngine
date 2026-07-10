@@ -237,6 +237,52 @@ export namespace kairo::foundation::physics
             ClearForceAccumulators();
         }
 
+        /// Input: variable elapsed time, fixed simulation dt, and substep cap.
+        /// Output: number of fixed `Step` calls executed.
+        /// Task: let applications feed variable frame times while the physics
+        /// simulation advances in deterministic fixed-size increments.
+        std::uint32_t StepFixed(
+            float elapsedTime,
+            float fixedDt,
+            std::uint32_t maxSubSteps = 8)
+        {
+            RequireNonNegative(elapsedTime, "elapsedTime");
+            RequirePositive(fixedDt, "fixedDt");
+
+            if (maxSubSteps == 0)
+            {
+                throw std::invalid_argument("maxSubSteps must be greater than zero.");
+            }
+
+            m_FixedAccumulator += elapsedTime;
+
+            std::uint32_t steps = 0;
+            while (m_FixedAccumulator >= fixedDt && steps < maxSubSteps)
+            {
+                Step(fixedDt);
+                m_FixedAccumulator -= fixedDt;
+                ++steps;
+            }
+
+            if (steps == maxSubSteps && m_FixedAccumulator >= fixedDt)
+            {
+                m_FixedAccumulator = 0.0f;
+            }
+
+            return steps;
+        }
+
+        [[nodiscard]]
+        float FixedAccumulator() const noexcept
+        {
+            return m_FixedAccumulator;
+        }
+
+        void ResetFixedAccumulator() noexcept
+        {
+            m_FixedAccumulator = 0.0f;
+        }
+
         [[nodiscard]]
         const std::vector<RigidBody>& Bodies() const noexcept
         {
@@ -285,6 +331,7 @@ export namespace kairo::foundation::physics
         BroadphaseWorld m_Broadphase;
         std::vector<BroadphasePair> m_LastPairs;
         std::vector<ContactManifold> m_LastContacts;
+        float m_FixedAccumulator = 0.0f;
 
         struct ContactCacheEntry final
         {

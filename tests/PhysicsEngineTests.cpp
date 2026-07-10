@@ -421,6 +421,35 @@ TEST_CASE("Sleeping bodies stop integrating and wake on force", "[PhysicsEngine]
     REQUIRE(world.Bodies()[body].State.LinearVelocity.x > 0.0f);
 }
 
+TEST_CASE("Fixed timestep accumulator advances deterministic substeps", "[PhysicsEngine][World]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    RigidBodyDesc desc =
+        DynamicSphereBody(Vec3f::Zero());
+
+    desc.EnableGravity = false;
+    desc.State.LinearVelocity = Vec3f{ 1.0f, 0.0f, 0.0f };
+
+    const BodyID body =
+        world.CreateRigidBody(desc);
+
+    constexpr float fixedDt = 1.0f / 60.0f;
+
+    REQUIRE(world.StepFixed(fixedDt * 0.5f, fixedDt) == 0);
+    REQUIRE(world.Bodies()[body].State.Position.x == Catch::Approx(0.0f));
+    REQUIRE(world.FixedAccumulator() == Catch::Approx(fixedDt * 0.5f));
+
+    REQUIRE(world.StepFixed(fixedDt * 0.5f, fixedDt) == 1);
+    REQUIRE(world.Bodies()[body].State.Position.x == Catch::Approx(fixedDt).margin(1.0e-6f));
+
+    world.ResetFixedAccumulator();
+    REQUIRE(world.FixedAccumulator() == Catch::Approx(0.0f));
+    REQUIRE_THROWS_AS(world.StepFixed(fixedDt, fixedDt, 0), std::invalid_argument);
+}
+
 TEST_CASE("AABB contacts are detected", "[PhysicsEngine][Narrowphase]")
 {
     const RigidBody a =
