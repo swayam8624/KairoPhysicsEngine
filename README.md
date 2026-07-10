@@ -62,10 +62,12 @@ Run the GLFW debug sandbox when GLFW/OpenGL are available:
 GLFW playground controls:
 
 ```text
-1                 add sphere
-2                 add box
-3                 add a small stack
-4                 launch two dynamic collision pairs
+1                 falling sphere demo
+2                 sphere collision demo
+3                 box stack demo
+4                 friction ramp demo
+5                 restitution/bounce demo
+6                 sleeping stack demo
 Delete/Backspace  remove selected object
 C                 clear dynamic objects
 Tab               select next dynamic object

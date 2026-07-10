@@ -74,9 +74,6 @@ namespace
     constexpr float RayRotationSpeed =
         1.8f;
 
-    constexpr float CollisionDemoSpeed =
-        4.4f;
-
     enum class ActorKind
     {
         Sphere,
@@ -133,6 +130,7 @@ namespace
         float RayAngle = 0.0f;
         std::uint32_t CallbackEvents = 0;
         std::uint32_t TriggerCallbackEvents = 0;
+        int ActiveDemo = 0;
         int SpawnIndex = 0;
     };
 
@@ -377,40 +375,8 @@ namespace
         return state.Actors.back();
     }
 
-    Actor& AddTrigger(
-        SandboxState& state,
-        const Vec3f& position,
-        const Vec3f& halfExtents,
-        const Color& color)
-    {
-        const BodyID body =
-            state.World.CreateRigidBody(StaticBoxBody(position));
-
-        const ColliderID collider =
-            state.World.AddCollider(body, BoxCollider{ halfExtents }, GroundMaterial());
-
-        state.World.SetCollisionFilter(
-            collider,
-            CollisionLayer::Trigger,
-            CollisionLayer::All);
-
-        state.World.SetColliderTrigger(collider, true);
-
-        state.Actors.push_back(
-            Actor
-            {
-                body,
-                collider,
-                ActorKind::Trigger,
-                0.0f,
-                halfExtents,
-                Quaternionf::Identity(),
-                color,
-                false
-            });
-
-        return state.Actors.back();
-    }
+    void SpawnStack(
+        SandboxState& state);
 
     void ResetWorld(
         SandboxState& state)
@@ -430,12 +396,16 @@ namespace
         const float rayAngle =
             state.RayAngle;
 
+        const int activeDemo =
+            state.ActiveDemo;
+
         state = SandboxState{};
         state.Paused = paused;
         state.ShowDebug = showDebug;
         state.GravityEnabled = gravityEnabled;
         state.ShowRays = showRays;
         state.RayAngle = rayAngle;
+        state.ActiveDemo = activeDemo;
         state.World.Settings.EnableSleeping = false;
         state.World.Settings.VelocityIterations = 18;
         state.World.Settings.PositionIterations = 8;
@@ -467,30 +437,58 @@ namespace
         AddStaticBox(state, Vec3f{ -8.65f, 3.85f, 0.0f }, Vec3f{ 0.30f, 4.35f, 0.5f }, 0.0f, Color{ 0.30f, 0.32f, 0.36f, 1.0f });
         AddStaticBox(state, Vec3f{ 8.65f, 3.85f, 0.0f }, Vec3f{ 0.30f, 4.35f, 0.5f }, 0.0f, Color{ 0.30f, 0.32f, 0.36f, 1.0f });
         AddStaticBox(state, Vec3f{ 0.0f, 8.15f, 0.0f }, Vec3f{ 8.65f, 0.30f, 0.5f }, 0.0f, Color{ 0.30f, 0.32f, 0.36f, 1.0f });
-        AddStaticBox(state, Vec3f{ -3.5f, 1.05f, 0.0f }, Vec3f{ 1.25f, 0.12f, 0.5f }, -0.25f, Color{ 0.42f, 0.43f, 0.48f, 1.0f });
-        AddStaticBox(state, Vec3f{ 3.35f, 2.1f, 0.0f }, Vec3f{ 1.35f, 0.12f, 0.5f }, 0.28f, Color{ 0.42f, 0.43f, 0.48f, 1.0f });
-        AddStaticBox(state, Vec3f{ 0.0f, 4.2f, 0.0f }, Vec3f{ 1.0f, 0.1f, 0.5f }, 0.0f, Color{ 0.42f, 0.43f, 0.48f, 1.0f });
-        AddTrigger(state, Vec3f{ 0.0f, 1.75f, 0.0f }, Vec3f{ 0.9f, 0.08f, 0.5f }, Color{ 0.15f, 0.85f, 0.65f, 0.25f });
-
-        const BodyID blue =
-            AddSphere(state, Vec3f{ -0.95f, 4.55f, 0.0f }, 0.42f, Color{ 0.31f, 0.68f, 0.96f, 1.0f }).Body;
-
-        const BodyID green =
-            AddSphere(state, Vec3f{ -0.10f, 5.10f, 0.0f }, 0.36f, Color{ 0.32f, 0.88f, 0.55f, 1.0f }).Body;
-
-        const BodyID amber =
-            AddBox(state, Vec3f{ 0.65f, 4.60f, 0.0f }, Vec3f{ 0.45f, 0.45f, 0.5f }, Color{ 0.98f, 0.72f, 0.25f, 1.0f }).Body;
-
-        const BodyID magenta =
-            AddBox(state, Vec3f{ 1.25f, 5.25f, 0.0f }, Vec3f{ 0.55f, 0.32f, 0.5f }, Color{ 0.92f, 0.45f, 0.84f, 1.0f }).Body;
-
-        state.World.Bodies().at(blue).State.LinearVelocity = Vec3f{ 1.0f, 0.0f, 0.0f };
-        state.World.Bodies().at(green).State.LinearVelocity = Vec3f{ 0.55f, -0.1f, 0.0f };
-        state.World.Bodies().at(amber).State.LinearVelocity = Vec3f{ -0.7f, 0.0f, 0.0f };
-        state.World.Bodies().at(magenta).State.LinearVelocity = Vec3f{ -0.45f, -0.05f, 0.0f };
+        if (state.ActiveDemo == 0)
+        {
+            AddSphere(state, Vec3f{ 0.0f, 4.6f, 0.0f }, 0.48f, Color{ 0.31f, 0.68f, 0.96f, 1.0f });
+        }
+        else if (state.ActiveDemo == 1)
+        {
+            state.World.Gravity = Vec3f::Zero();
+            const BodyID left =
+                AddSphere(state, Vec3f{ -4.0f, 4.6f, 0.0f }, 0.46f, Color{ 0.31f, 0.68f, 0.96f, 1.0f }).Body;
+            const BodyID right =
+                AddSphere(state, Vec3f{ 4.0f, 4.6f, 0.0f }, 0.46f, Color{ 0.32f, 0.88f, 0.55f, 1.0f }).Body;
+            state.World.Bodies().at(left).EnableGravity = false;
+            state.World.Bodies().at(right).EnableGravity = false;
+            state.World.Bodies().at(left).State.LinearVelocity = Vec3f{ 4.0f, 0.0f, 0.0f };
+            state.World.Bodies().at(right).State.LinearVelocity = Vec3f{ -4.0f, 0.0f, 0.0f };
+        }
+        else if (state.ActiveDemo == 2)
+        {
+            SpawnStack(state);
+        }
+        else if (state.ActiveDemo == 3)
+        {
+            AddStaticBox(state, Vec3f{ 0.0f, 2.2f, 0.0f }, Vec3f{ 3.0f, 0.14f, 0.5f }, -0.32f, Color{ 0.42f, 0.43f, 0.48f, 1.0f });
+            AddBox(state, Vec3f{ -2.25f, 4.0f, 0.0f }, Vec3f{ 0.42f, 0.42f, 0.5f }, Color{ 0.98f, 0.72f, 0.25f, 1.0f });
+        }
+        else if (state.ActiveDemo == 4)
+        {
+            for (int i = 0; i < 4; ++i)
+            {
+                AddSphere(
+                    state,
+                    Vec3f{ -2.4f + static_cast<float>(i) * 1.6f, 5.2f, 0.0f },
+                    0.36f,
+                    i % 2 == 0
+                        ? Color{ 0.31f, 0.68f, 0.96f, 1.0f }
+                        : Color{ 0.92f, 0.45f, 0.84f, 1.0f });
+            }
+        }
+        else
+        {
+            for (int i = 0; i < 8; ++i)
+            {
+                AddBox(
+                    state,
+                    Vec3f{ 0.0f, 0.46f + static_cast<float>(i) * 0.72f, 0.0f },
+                    Vec3f{ 0.32f, 0.32f, 0.5f },
+                    Color{ 0.98f, 0.72f, 0.25f, 1.0f });
+            }
+        }
 
         state.Selected =
-            state.Actors.size() - 4u;
+            state.Actors.empty() ? 0u : state.Actors.size() - 1u;
     }
 
     [[nodiscard]]
@@ -538,48 +536,6 @@ namespace
         state.Selected = 0;
     }
 
-    void SpawnNextSphere(
-        SandboxState& state)
-    {
-        const float x =
-            -5.0f + static_cast<float>((state.SpawnIndex * 37) % 100) / 100.0f * 10.0f;
-
-        const float radius =
-            state.SpawnIndex % 2 == 0 ? 0.35f : 0.48f;
-
-        AddSphere(
-            state,
-            Vec3f{ x, 6.55f, 0.0f },
-            radius,
-            state.SpawnIndex % 2 == 0
-                ? Color{ 0.34f, 0.75f, 0.98f, 1.0f }
-                : Color{ 0.30f, 0.90f, 0.60f, 1.0f });
-
-        ++state.SpawnIndex;
-    }
-
-    void SpawnNextBox(
-        SandboxState& state)
-    {
-        const float x =
-            -5.0f + static_cast<float>((state.SpawnIndex * 53) % 100) / 100.0f * 10.0f;
-
-        const Vec3f halfExtents =
-            state.SpawnIndex % 2 == 0
-                ? Vec3f{ 0.42f, 0.42f, 0.5f }
-                : Vec3f{ 0.58f, 0.30f, 0.5f };
-
-        AddBox(
-            state,
-            Vec3f{ x, 6.55f, 0.0f },
-            halfExtents,
-            state.SpawnIndex % 2 == 0
-                ? Color{ 0.98f, 0.73f, 0.25f, 1.0f }
-                : Color{ 0.92f, 0.48f, 0.84f, 1.0f });
-
-        ++state.SpawnIndex;
-    }
-
     void SpawnStack(
         SandboxState& state)
     {
@@ -597,65 +553,6 @@ namespace
                     Color{ 0.96f, 0.62f, 0.25f, 1.0f });
             }
         }
-    }
-
-    void SpawnCollisionDemo(
-        SandboxState& state)
-    {
-        const BodyID leftSphere =
-            AddSphere(
-                state,
-                Vec3f{ -4.4f, 5.15f, 0.0f },
-                0.46f,
-                Color{ 0.28f, 0.78f, 1.0f, 1.0f }).Body;
-
-        const BodyID rightSphere =
-            AddSphere(
-                state,
-                Vec3f{ 4.4f, 5.15f, 0.0f },
-                0.46f,
-                Color{ 0.28f, 0.96f, 0.58f, 1.0f }).Body;
-
-        const BodyID leftBox =
-            AddBox(
-                state,
-                Vec3f{ -4.8f, 3.25f, 0.0f },
-                Vec3f{ 0.50f, 0.38f, 0.5f },
-                Color{ 1.0f, 0.72f, 0.22f, 1.0f }).Body;
-
-        const BodyID rightBox =
-            AddBox(
-                state,
-                Vec3f{ 4.8f, 3.25f, 0.0f },
-                Vec3f{ 0.50f, 0.38f, 0.5f },
-                Color{ 0.94f, 0.42f, 0.92f, 1.0f }).Body;
-
-        RigidBody& leftSphereBody =
-            state.World.Bodies().at(leftSphere);
-
-        RigidBody& rightSphereBody =
-            state.World.Bodies().at(rightSphere);
-
-        RigidBody& leftBoxBody =
-            state.World.Bodies().at(leftBox);
-
-        RigidBody& rightBoxBody =
-            state.World.Bodies().at(rightBox);
-
-        leftSphereBody.EnableGravity = false;
-        rightSphereBody.EnableGravity = false;
-        leftBoxBody.EnableGravity = false;
-        rightBoxBody.EnableGravity = false;
-
-        leftSphereBody.LinearDamping = 0.03f;
-        rightSphereBody.LinearDamping = 0.03f;
-        leftBoxBody.LinearDamping = 0.03f;
-        rightBoxBody.LinearDamping = 0.03f;
-
-        leftSphereBody.State.LinearVelocity = Vec3f{ CollisionDemoSpeed, 0.0f, 0.0f };
-        rightSphereBody.State.LinearVelocity = Vec3f{ -CollisionDemoSpeed, 0.0f, 0.0f };
-        leftBoxBody.State.LinearVelocity = Vec3f{ CollisionDemoSpeed * 0.95f, 0.0f, 0.0f };
-        rightBoxBody.State.LinearVelocity = Vec3f{ -CollisionDemoSpeed * 0.95f, 0.0f, 0.0f };
     }
 
     [[nodiscard]]
@@ -1293,7 +1190,8 @@ namespace
         std::snprintf(
             title,
             sizeof(title),
-            "KairoPhysics Playground | %s | gravity %s | rays %s | selected %u %s | dynamic %zu | contacts %zu events %zu callbacks %u trigger-cb %u | 1 sphere 2 box 3 stack 4 collision L rays J/K rotate rays Delete remove C clear Tab next [ previous WASD/Arrows gentle push Shift+move Q/E torque Space pause N step R reset G gravity T debug",
+            "KairoPhysics Playground | demo %d | %s | gravity %s | rays %s | selected %u %s | dynamic %zu | contacts %zu events %zu callbacks %u trigger-cb %u | 1 fall 2 collide 3 stack 4 ramp 5 bounce 6 sleep L rays J/K rotate rays Delete remove C clear Tab next [ previous WASD/Arrows gentle push Shift+move Q/E torque Space pause N step R reset G gravity T debug",
+            state.ActiveDemo + 1,
             state.Paused ? "paused" : "running",
             state.GravityEnabled ? "on" : "off",
             state.ShowRays ? "on" : "off",
@@ -1344,10 +1242,12 @@ int main()
     KeyLatch gravity;
     KeyLatch selectNext;
     KeyLatch selectPrevious;
-    KeyLatch spawnSphere;
-    KeyLatch spawnBox;
-    KeyLatch spawnStack;
-    KeyLatch spawnCollision;
+    KeyLatch demo1;
+    KeyLatch demo2;
+    KeyLatch demo3;
+    KeyLatch demo4;
+    KeyLatch demo5;
+    KeyLatch demo6;
     KeyLatch remove;
     KeyLatch clear;
     KeyLatch toggleRays;
@@ -1402,24 +1302,40 @@ int main()
             SelectNext(state, -1);
         }
 
-        if (spawnSphere.Pressed(KeyDown(window.get(), GLFW_KEY_1)))
+        if (demo1.Pressed(KeyDown(window.get(), GLFW_KEY_1)))
         {
-            SpawnNextSphere(state);
+            state.ActiveDemo = 0;
+            ResetWorld(state);
         }
 
-        if (spawnBox.Pressed(KeyDown(window.get(), GLFW_KEY_2)))
+        if (demo2.Pressed(KeyDown(window.get(), GLFW_KEY_2)))
         {
-            SpawnNextBox(state);
+            state.ActiveDemo = 1;
+            ResetWorld(state);
         }
 
-        if (spawnStack.Pressed(KeyDown(window.get(), GLFW_KEY_3)))
+        if (demo3.Pressed(KeyDown(window.get(), GLFW_KEY_3)))
         {
-            SpawnStack(state);
+            state.ActiveDemo = 2;
+            ResetWorld(state);
         }
 
-        if (spawnCollision.Pressed(KeyDown(window.get(), GLFW_KEY_4)))
+        if (demo4.Pressed(KeyDown(window.get(), GLFW_KEY_4)))
         {
-            SpawnCollisionDemo(state);
+            state.ActiveDemo = 3;
+            ResetWorld(state);
+        }
+
+        if (demo5.Pressed(KeyDown(window.get(), GLFW_KEY_5)))
+        {
+            state.ActiveDemo = 4;
+            ResetWorld(state);
+        }
+
+        if (demo6.Pressed(KeyDown(window.get(), GLFW_KEY_6)))
+        {
+            state.ActiveDemo = 5;
+            ResetWorld(state);
         }
 
         if (toggleRays.Pressed(KeyDown(window.get(), GLFW_KEY_L)))
