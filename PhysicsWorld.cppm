@@ -55,6 +55,7 @@ export namespace kairo::foundation::physics
             m_Colliders.push_back(
                 MakeCollider(id, body, shape, material, localCenter));
 
+            m_Broadphase.AddOrUpdateCollider(m_Bodies, m_Colliders.back());
             return id;
         }
 
@@ -66,8 +67,9 @@ export namespace kairo::foundation::physics
 
             IntegrateForces(dt);
 
+            m_Broadphase.Sync(m_Bodies, m_Colliders);
             m_LastPairs =
-                ComputeBroadphasePairs(m_Bodies, m_Colliders);
+                m_Broadphase.ComputePairs(m_Bodies, m_Colliders);
 
             m_LastContacts =
                 ComputeContacts(m_Bodies, m_Colliders, m_LastPairs);
@@ -133,6 +135,7 @@ export namespace kairo::foundation::physics
     private:
         std::vector<RigidBody> m_Bodies;
         std::vector<Collider> m_Colliders;
+        BroadphaseWorld m_Broadphase;
         std::vector<BroadphasePair> m_LastPairs;
         std::vector<ContactManifold> m_LastContacts;
 

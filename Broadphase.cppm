@@ -35,6 +35,206 @@ export namespace kairo::foundation::physics
             : BroadphasePair{ b, a };
     }
 
+    struct BroadphaseProxy final
+    {
+        spatial::SpatialIndex Proxy = spatial::SpatialInvalidIndex;
+        bool InTree = false;
+        bool Infinite = false;
+    };
+
+    class BroadphaseWorld final
+    {
+    public:
+        void Clear()
+        {
+            m_Tree = spatial::DynamicAABBTree{};
+            m_Proxies.clear();
+            m_InfiniteColliders.clear();
+        }
+
+        void AddOrUpdateCollider(
+            const std::vector<RigidBody>& bodies,
+            const Collider& collider)
+        {
+            EnsureProxy(collider.ID);
+
+            BroadphaseProxy& proxy =
+                m_Proxies.at(collider.ID);
+
+            if (collider.Body >= bodies.size())
+            {
+                RemoveCollider(collider.ID);
+                return;
+            }
+
+            if (IsInfiniteCollider(collider))
+            {
+                if (proxy.InTree)
+                {
+                    m_Tree.Remove(proxy.Proxy);
+                }
+
+                proxy.Proxy = spatial::SpatialInvalidIndex;
+                proxy.InTree = false;
+                proxy.Infinite = true;
+                AddInfinite(collider.ID);
+                return;
+            }
+
+            const spatial::SpatialAABB bounds =
+                WorldAABB(bodies.at(collider.Body), collider);
+
+            if (proxy.InTree)
+            {
+                [[maybe_unused]] const bool reinserted =
+                    m_Tree.Update(proxy.Proxy, bounds);
+            }
+            else
+            {
+                proxy.Proxy =
+                    m_Tree.Insert(
+                        collider.ID,
+                        bounds,
+                        collider.LayerMask);
+                proxy.InTree = true;
+            }
+
+            proxy.Infinite = false;
+            RemoveInfinite(collider.ID);
+        }
+
+        void RemoveCollider(
+            ColliderID collider)
+        {
+            if (collider >= m_Proxies.size())
+            {
+                return;
+            }
+
+            BroadphaseProxy& proxy =
+                m_Proxies.at(collider);
+
+            if (proxy.InTree)
+            {
+                m_Tree.Remove(proxy.Proxy);
+            }
+
+            proxy = {};
+            RemoveInfinite(collider);
+        }
+
+        void Sync(
+            const std::vector<RigidBody>& bodies,
+            const std::vector<Collider>& colliders)
+        {
+            for (const Collider& collider : colliders)
+            {
+                AddOrUpdateCollider(bodies, collider);
+            }
+        }
+
+        [[nodiscard]]
+        std::vector<BroadphasePair> ComputePairs(
+            const std::vector<RigidBody>& bodies,
+            const std::vector<Collider>& colliders) const
+        {
+            std::vector<BroadphasePair> pairs;
+
+            for (const spatial::SpatialPair& pair : m_Tree.ComputePairs())
+            {
+                if (ShouldPair(pair.A, pair.B, bodies, colliders))
+                {
+                    pairs.push_back(OrderedBroadphasePair(pair.A, pair.B));
+                }
+            }
+
+            for (const Collider& collider : colliders)
+            {
+                if (collider.ID >= m_Proxies.size() ||
+                    !m_Proxies.at(collider.ID).InTree)
+                {
+                    continue;
+                }
+
+                for (ColliderID infinite : m_InfiniteColliders)
+                {
+                    if (ShouldPair(collider.ID, infinite, bodies, colliders))
+                    {
+                        pairs.push_back(OrderedBroadphasePair(collider.ID, infinite));
+                    }
+                }
+            }
+
+            SortUnique(pairs);
+            return pairs;
+        }
+
+    private:
+        spatial::DynamicAABBTree m_Tree;
+        std::vector<BroadphaseProxy> m_Proxies;
+        std::vector<ColliderID> m_InfiniteColliders;
+
+        void EnsureProxy(
+            ColliderID collider)
+        {
+            if (collider >= m_Proxies.size())
+            {
+                m_Proxies.resize(static_cast<std::size_t>(collider) + 1u);
+            }
+        }
+
+        void AddInfinite(
+            ColliderID collider)
+        {
+            if (std::find(m_InfiniteColliders.begin(), m_InfiniteColliders.end(), collider) == m_InfiniteColliders.end())
+            {
+                m_InfiniteColliders.push_back(collider);
+            }
+        }
+
+        void RemoveInfinite(
+            ColliderID collider)
+        {
+            m_InfiniteColliders.erase(
+                std::remove(m_InfiniteColliders.begin(), m_InfiniteColliders.end(), collider),
+                m_InfiniteColliders.end());
+        }
+
+        [[nodiscard]]
+        static bool ShouldPair(
+            ColliderID a,
+            ColliderID b,
+            const std::vector<RigidBody>& bodies,
+            const std::vector<Collider>& colliders)
+        {
+            if (a >= colliders.size() || b >= colliders.size())
+            {
+                return false;
+            }
+
+            const Collider& ca = colliders.at(a);
+            const Collider& cb = colliders.at(b);
+            return ca.Body < bodies.size() &&
+                cb.Body < bodies.size() &&
+                ca.Body != cb.Body &&
+                (ca.LayerMask & cb.LayerMask) != 0u;
+        }
+
+        static void SortUnique(
+            std::vector<BroadphasePair>& pairs)
+        {
+            std::sort(
+                pairs.begin(),
+                pairs.end(),
+                [](const BroadphasePair& lhs, const BroadphasePair& rhs)
+                {
+                    return lhs.A == rhs.A ? lhs.B < rhs.B : lhs.A < rhs.A;
+                });
+
+            pairs.erase(std::unique(pairs.begin(), pairs.end()), pairs.end());
+        }
+    };
+
     /// Input: bodies and colliders.
     /// Output: deterministic potentially-overlapping collider pairs.
     /// Task: reuse KairoSpatial's dynamic AABB tree for finite collider overlap
@@ -44,55 +244,8 @@ export namespace kairo::foundation::physics
         const std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders)
     {
-        spatial::DynamicAABBTree tree;
-        std::vector<ColliderID> finiteColliders;
-        std::vector<ColliderID> planeColliders;
-
-        for (const Collider& collider : colliders)
-        {
-            if (collider.Body >= bodies.size())
-            {
-                continue;
-            }
-
-            if (IsInfiniteCollider(collider))
-            {
-                planeColliders.push_back(collider.ID);
-                continue;
-            }
-
-            [[maybe_unused]] const spatial::SpatialIndex proxy =
-                tree.Insert(
-                collider.ID,
-                WorldAABB(bodies.at(collider.Body), collider),
-                collider.LayerMask);
-
-            finiteColliders.push_back(collider.ID);
-        }
-
-        std::vector<BroadphasePair> pairs;
-        for (const spatial::SpatialPair& pair : tree.ComputePairs())
-        {
-            pairs.push_back(OrderedBroadphasePair(pair.A, pair.B));
-        }
-
-        for (ColliderID finite : finiteColliders)
-        {
-            for (ColliderID plane : planeColliders)
-            {
-                pairs.push_back(OrderedBroadphasePair(finite, plane));
-            }
-        }
-
-        std::sort(
-            pairs.begin(),
-            pairs.end(),
-            [](const BroadphasePair& lhs, const BroadphasePair& rhs)
-            {
-                return lhs.A == rhs.A ? lhs.B < rhs.B : lhs.A < rhs.A;
-            });
-
-        pairs.erase(std::unique(pairs.begin(), pairs.end()), pairs.end());
-        return pairs;
+        BroadphaseWorld broadphase;
+        broadphase.Sync(bodies, colliders);
+        return broadphase.ComputePairs(bodies, colliders);
     }
 }

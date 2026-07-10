@@ -65,6 +65,34 @@ TEST_CASE("Broadphase pairs overlapping finite colliders and planes", "[PhysicsE
     REQUIRE(pairs.size() == 3);
 }
 
+TEST_CASE("Persistent broadphase updates moved colliders and excludes same-body pairs", "[PhysicsEngine][Broadphase]")
+{
+    std::vector<RigidBody> bodies;
+    bodies.push_back(MakeRigidBody(0, DynamicSphereBody(Vec3f{ 0.0f, 0.5f, 0.0f })));
+    bodies.push_back(MakeRigidBody(1, DynamicSphereBody(Vec3f{ 5.0f, 0.5f, 0.0f })));
+
+    std::vector<Collider> colliders;
+    colliders.push_back(MakeCollider(0, 0, SphereCollider{ 0.5f }));
+    colliders.push_back(MakeCollider(1, 0, SphereCollider{ 0.5f }, {}, Vec3f{ 0.1f, 0.0f, 0.0f }));
+    colliders.push_back(MakeCollider(2, 1, SphereCollider{ 0.5f }));
+
+    BroadphaseWorld broadphase;
+    broadphase.Sync(bodies, colliders);
+    REQUIRE(broadphase.ComputePairs(bodies, colliders).empty());
+
+    bodies[1].State.Position = Vec3f{ 0.7f, 0.5f, 0.0f };
+    broadphase.Sync(bodies, colliders);
+
+    const std::vector<BroadphasePair> pairs =
+        broadphase.ComputePairs(bodies, colliders);
+
+    REQUIRE(pairs.size() == 2);
+    REQUIRE(pairs[0].A == 0);
+    REQUIRE(pairs[0].B == 2);
+    REQUIRE(pairs[1].A == 1);
+    REQUIRE(pairs[1].B == 2);
+}
+
 TEST_CASE("Narrowphase creates sphere and plane contacts", "[PhysicsEngine][Narrowphase]")
 {
     const RigidBody sphereBody =
