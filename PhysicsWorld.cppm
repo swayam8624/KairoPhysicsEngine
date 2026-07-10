@@ -1,6 +1,7 @@
 module;
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -61,6 +62,19 @@ export namespace kairo::foundation::physics
         Vec3f Normal = Vec3f::UnitX();
         float Distance = 0.0f;
         bool IsTrigger = false;
+    };
+
+    /// Input: one completed `PhysicsWorld::Step`.
+    /// Output: wall-clock timings for the major engine phases in milliseconds.
+    /// Task: support benchmark CSV output without forcing sandbox tools to
+    /// guess timings from outside the world. Values are diagnostic snapshots,
+    /// not deterministic simulation state.
+    struct PhysicsStepProfile final
+    {
+        double StepMs = 0.0;
+        double BroadphaseMs = 0.0;
+        double NarrowphaseMs = 0.0;
+        double SolverMs = 0.0;
     };
 
     struct CollisionPairResponseRule final
@@ -517,15 +531,27 @@ export namespace kairo::foundation::physics
         void Step(
             float dt)
         {
+            const auto stepStart =
+                std::chrono::steady_clock::now();
+
             ValidateStepSettings(Settings, dt);
             RequireFinite(Gravity, "Gravity");
 
             IntegrateForces(dt);
             IntegrateKinematicVelocities(dt);
 
+            const auto broadphaseStart =
+                std::chrono::steady_clock::now();
+
             m_Broadphase.Sync(m_Bodies, m_Colliders);
             m_LastPairs =
                 m_Broadphase.ComputePairs(m_Bodies, m_Colliders);
+
+            const auto broadphaseEnd =
+                std::chrono::steady_clock::now();
+
+            const auto narrowphaseStart =
+                broadphaseEnd;
 
             m_LastContacts =
                 ComputeContacts(m_Bodies, m_Colliders, m_LastPairs);
@@ -534,6 +560,13 @@ export namespace kairo::foundation::physics
             UpdateContactEvents();
             DispatchContactEvents();
             WakeContactBodies();
+
+            const auto narrowphaseEnd =
+                std::chrono::steady_clock::now();
+
+            const auto solverStart =
+                narrowphaseEnd;
+
             RestoreContactCache();
             WarmStartContacts(m_Bodies, m_Colliders, m_LastContacts);
 
@@ -551,9 +584,23 @@ export namespace kairo::foundation::physics
                 m_LastContacts,
                 Settings);
 
+            const auto solverEnd =
+                std::chrono::steady_clock::now();
+
             IntegrateDynamicVelocities(dt);
             UpdateSleeping(dt);
             ClearForceAccumulators();
+
+            const auto stepEnd =
+                std::chrono::steady_clock::now();
+
+            m_LastProfile =
+            {
+                ElapsedMilliseconds(stepStart, stepEnd),
+                ElapsedMilliseconds(broadphaseStart, broadphaseEnd),
+                ElapsedMilliseconds(narrowphaseStart, narrowphaseEnd),
+                ElapsedMilliseconds(solverStart, solverEnd)
+            };
         }
 
         /// Input: variable elapsed time, fixed simulation dt, and substep cap.
@@ -636,6 +683,12 @@ export namespace kairo::foundation::physics
         const std::vector<BroadphasePair>& BroadphasePairs() const noexcept
         {
             return m_LastPairs;
+        }
+
+        [[nodiscard]]
+        const PhysicsStepProfile& LastStepProfile() const noexcept
+        {
+            return m_LastProfile;
         }
 
         [[nodiscard]]
@@ -797,6 +850,7 @@ export namespace kairo::foundation::physics
         std::vector<ContactManifold> m_LastContacts;
         std::vector<PhysicsContactEvent> m_LastEvents;
         float m_FixedAccumulator = 0.0f;
+        PhysicsStepProfile m_LastProfile;
         std::vector<CollisionPairResponseRule> m_PairResponses;
         std::vector<CollisionLayerResponseRule> m_LayerResponses;
         CollisionFilterCallback m_CollisionFilterCallback;
@@ -826,6 +880,15 @@ export namespace kairo::foundation::physics
         };
 
         std::vector<ContactCacheEntry> m_ContactCache;
+
+        template<typename ClockTimePoint>
+        [[nodiscard]]
+        static double ElapsedMilliseconds(
+            const ClockTimePoint& start,
+            const ClockTimePoint& end)
+        {
+            return std::chrono::duration<double, std::milli>(end - start).count();
+        }
 
         static void ValidateLayerMask(
             std::uint32_t layerMask,

@@ -590,6 +590,10 @@ TEST_CASE("Dynamic body damping and velocity clamps are applied", "[PhysicsEngin
     world.Step(1.0f / 60.0f);
 
     REQUIRE(world.Bodies()[body].State.LinearVelocity.Length() == Catch::Approx(10.0f).margin(1.0e-4f));
+    REQUIRE(world.LastStepProfile().StepMs >= 0.0);
+    REQUIRE(world.LastStepProfile().BroadphaseMs >= 0.0);
+    REQUIRE(world.LastStepProfile().NarrowphaseMs >= 0.0);
+    REQUIRE(world.LastStepProfile().SolverMs >= 0.0);
 }
 
 TEST_CASE("Sleeping bodies stop integrating and wake on force", "[PhysicsEngine][World]")
