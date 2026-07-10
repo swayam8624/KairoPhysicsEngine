@@ -214,46 +214,53 @@ export namespace kairo::foundation::physics
         const std::vector<ContactManifold>& contacts,
         const PhysicsStepSettings& settings)
     {
-        for (const ContactManifold& manifold : contacts)
+        for (std::uint32_t iteration = 0; iteration < settings.PositionIterations; ++iteration)
         {
-            if (manifold.BodyA >= bodies.size() || manifold.BodyB >= bodies.size())
+            for (const ContactManifold& manifold : contacts)
             {
-                continue;
-            }
-
-            RigidBody& bodyA = bodies.at(manifold.BodyA);
-            RigidBody& bodyB = bodies.at(manifold.BodyB);
-            if (!IsActiveBody(bodyA) || !IsActiveBody(bodyB))
-            {
-                continue;
-            }
-
-            const float inverseMassSum =
-                bodyA.Mass.InverseMass + bodyB.Mass.InverseMass;
-
-            if (inverseMassSum <= 0.0f)
-            {
-                continue;
-            }
-
-            for (const ContactPoint& point : manifold.Points)
-            {
-                const float correctionMagnitude =
-                    std::min(
-                        std::max(point.PenetrationDepth - settings.Slop, 0.0f) / inverseMassSum,
-                        settings.MaxPositionCorrection);
-
-                const Vec3f correction =
-                    SafeNormalize(point.Normal, Vec3f::Up()) * correctionMagnitude;
-
-                if (IsDynamic(bodyA))
+                if (manifold.BodyA >= bodies.size() || manifold.BodyB >= bodies.size())
                 {
-                    bodyA.State.Position -= correction * bodyA.Mass.InverseMass;
+                    continue;
                 }
 
-                if (IsDynamic(bodyB))
+                RigidBody& bodyA = bodies.at(manifold.BodyA);
+                RigidBody& bodyB = bodies.at(manifold.BodyB);
+                if (!IsActiveBody(bodyA) || !IsActiveBody(bodyB))
                 {
-                    bodyB.State.Position += correction * bodyB.Mass.InverseMass;
+                    continue;
+                }
+
+                const float inverseMassSum =
+                    bodyA.Mass.InverseMass + bodyB.Mass.InverseMass;
+
+                if (inverseMassSum <= 0.0f)
+                {
+                    continue;
+                }
+
+                for (const ContactPoint& point : manifold.Points)
+                {
+                    const float totalCorrectionMagnitude =
+                        std::min(
+                            std::max(point.PenetrationDepth - settings.Slop, 0.0f) / inverseMassSum,
+                            settings.MaxPositionCorrection);
+
+                    const float correctionMagnitude =
+                        totalCorrectionMagnitude /
+                        static_cast<float>(settings.PositionIterations);
+
+                    const Vec3f correction =
+                        SafeNormalize(point.Normal, Vec3f::Up()) * correctionMagnitude;
+
+                    if (IsDynamic(bodyA))
+                    {
+                        bodyA.State.Position -= correction * bodyA.Mass.InverseMass;
+                    }
+
+                    if (IsDynamic(bodyB))
+                    {
+                        bodyB.State.Position += correction * bodyB.Mass.InverseMass;
+                    }
                 }
             }
         }

@@ -221,6 +221,32 @@ TEST_CASE("Contact solver uses exact collider material ids", "[PhysicsEngine][So
     REQUIRE(bodies[0].State.LinearVelocity.y == Catch::Approx(2.0f).margin(1.0e-4f));
 }
 
+TEST_CASE("Position correction iterates without moving static bodies", "[PhysicsEngine][Solver]")
+{
+    std::vector<RigidBody> bodies;
+    bodies.push_back(MakeRigidBody(0, DynamicSphereBody(Vec3f{ 0.0f, 0.4f, 0.0f })));
+    bodies.push_back(MakeRigidBody(1, StaticBody(Vec3f::Zero())));
+
+    ContactManifold manifold =
+        MakeContactManifold(0, 1, 0, 1);
+
+    manifold.Points.push_back(
+        MakeContactPoint(
+            Vec3f{ 0.0f, 0.0f, 0.0f },
+            Vec3f{ 0.0f, -1.0f, 0.0f },
+            0.1f));
+
+    PhysicsStepSettings settings;
+    settings.PositionIterations = 2;
+    settings.Slop = 0.0f;
+    settings.MaxPositionCorrection = 1.0f;
+
+    CorrectPositions(bodies, { manifold }, settings);
+
+    REQUIRE(bodies[0].State.Position.y == Catch::Approx(0.5f).margin(1.0e-4f));
+    REQUIRE(bodies[1].State.Position.y == Catch::Approx(0.0f).margin(1.0e-6f));
+}
+
 TEST_CASE("PhysicsWorld settles falling sphere against plane", "[PhysicsEngine][World]")
 {
     PhysicsWorld world;
@@ -290,4 +316,8 @@ TEST_CASE("Invalid world inputs throw", "[PhysicsEngine][Validation]")
     invalidDynamic.Mass = StaticMassProperties();
 
     REQUIRE_THROWS_AS(world.CreateRigidBody(invalidDynamic), std::invalid_argument);
+
+    PhysicsWorld invalidSettingsWorld;
+    invalidSettingsWorld.Settings.PositionIterations = 0;
+    REQUIRE_THROWS_AS(invalidSettingsWorld.Step(1.0f / 60.0f), std::invalid_argument);
 }

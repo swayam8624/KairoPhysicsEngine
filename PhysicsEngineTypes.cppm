@@ -14,6 +14,7 @@ export namespace kairo::foundation::physics
     {
         float GravityScale = 1.0f;
         std::uint32_t VelocityIterations = 12;
+        std::uint32_t PositionIterations = 4;
         float Baumgarte = 0.2f;
         float Slop = 0.01f;
         float MaxPositionCorrection = 0.25f;
@@ -36,6 +37,11 @@ export namespace kairo::foundation::physics
         if (settings.VelocityIterations == 0)
         {
             throw std::invalid_argument("VelocityIterations must be greater than zero.");
+        }
+
+        if (settings.PositionIterations == 0)
+        {
+            throw std::invalid_argument("PositionIterations must be greater than zero.");
         }
     }
 }
