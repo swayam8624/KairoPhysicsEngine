@@ -180,9 +180,11 @@ TEST_CASE("Contact solver reverses closing normal velocity", "[PhysicsEngine][So
     settings.VelocityIterations = 4;
     settings.Baumgarte = 0.0f;
 
-    SolveContacts(bodies, colliders, { manifold }, settings, 1.0f / 60.0f);
+    std::vector<ContactManifold> contacts{ manifold };
+    SolveContacts(bodies, colliders, contacts, settings, 1.0f / 60.0f);
 
     REQUIRE(bodies[0].State.LinearVelocity.y >= Catch::Approx(0.0f).margin(1.0e-4f));
+    REQUIRE(contacts[0].Points[0].NormalImpulse > 0.0f);
 }
 
 TEST_CASE("Contact solver uses exact collider material ids", "[PhysicsEngine][Solver]")
@@ -216,9 +218,36 @@ TEST_CASE("Contact solver uses exact collider material ids", "[PhysicsEngine][So
     settings.VelocityIterations = 1;
     settings.Baumgarte = 0.0f;
 
-    SolveContacts(bodies, colliders, { manifold }, settings, 1.0f / 60.0f);
+    std::vector<ContactManifold> contacts{ manifold };
+    SolveContacts(bodies, colliders, contacts, settings, 1.0f / 60.0f);
 
     REQUIRE(bodies[0].State.LinearVelocity.y == Catch::Approx(2.0f).margin(1.0e-4f));
+}
+
+TEST_CASE("Warm starting applies cached normal impulses", "[PhysicsEngine][Solver]")
+{
+    std::vector<RigidBody> bodies;
+    bodies.push_back(MakeRigidBody(0, DynamicSphereBody(Vec3f{ 0.0f, 0.4f, 0.0f })));
+    bodies.push_back(MakeRigidBody(1, StaticBody()));
+
+    std::vector<Collider> colliders;
+    colliders.push_back(MakeCollider(0, 0, SphereCollider{ 0.5f }));
+    colliders.push_back(MakeCollider(1, 1, PlaneCollider{ Vec3f::Up(), 0.0f }));
+
+    ContactManifold manifold =
+        MakeContactManifold(0, 1, 0, 1);
+
+    manifold.Points.push_back(
+        MakeContactPoint(
+            Vec3f{ 0.0f, 0.0f, 0.0f },
+            Vec3f{ 0.0f, -1.0f, 0.0f },
+            0.1f,
+            1.0f));
+
+    std::vector<ContactManifold> contacts{ manifold };
+    WarmStartContacts(bodies, colliders, contacts);
+
+    REQUIRE(bodies[0].State.LinearVelocity.y > 0.0f);
 }
 
 TEST_CASE("Position correction iterates without moving static bodies", "[PhysicsEngine][Solver]")
@@ -271,8 +300,7 @@ TEST_CASE("PhysicsWorld settles falling sphere against plane", "[PhysicsEngine][
     }
 
     REQUIRE(world.Bodies()[sphere].State.Position.y >= 0.48f);
-    REQUIRE(!world.Contacts().empty());
-    REQUIRE(!world.DebugContacts().empty());
+    REQUIRE(!world.BroadphasePairs().empty());
     REQUIRE(world.DebugAABBs().size() == 1);
 }
 

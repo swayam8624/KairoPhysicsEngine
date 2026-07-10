@@ -2,6 +2,7 @@ module;
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 export module Kairo.Foundation.PhysicsEngine.ContactSolver;
@@ -18,13 +19,15 @@ export namespace kairo::foundation::physics
 {
     using namespace kairo::foundation::math;
 
-    /// Input: body array, collider array, contact manifold, and dt.
-    /// Output: body velocities modified by normal and friction impulses.
-    /// Task: solve one contact manifold with a sequential impulse update.
+    /// Input: mutable bodies, colliders, one mutable manifold, and timestep.
+    /// Output: body velocities and contact accumulated impulses updated.
+    /// Task: solve one contact manifold with sequential impulses. The contact
+    /// points are mutable because commercial solvers cache accumulated normal
+    /// and tangent impulse values for warm starting on the next fixed step.
     inline void SolveContactManifold(
         std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders,
-        const ContactManifold& manifold,
+        ContactManifold& manifold,
         const PhysicsStepSettings& settings,
         float dt)
     {
@@ -73,7 +76,7 @@ export namespace kairo::foundation::physics
         const float dynamicFriction =
             MixFriction(materialA.DynamicFriction, materialB.DynamicFriction);
 
-        for (const ContactPoint& point : manifold.Points)
+        for (ContactPoint& point : manifold.Points)
         {
             const Vec3f normal =
                 SafeNormalize(point.Normal, Vec3f::Up());
@@ -119,19 +122,38 @@ export namespace kairo::foundation::physics
             const float normalVelocity =
                 Dot(relativeVelocity, normal);
 
-            float normalImpulseMagnitude =
-                ComputeNormalImpulseMagnitude(
-                    normalVelocity + bias,
-                    restitution,
-                    denominator);
+            if (denominator <= 1.0e-6f)
+            {
+                continue;
+            }
 
-            if (normalImpulseMagnitude <= 0.0f)
+            const float biasedNormalVelocity =
+                normalVelocity + bias;
+
+            const float restitutionScale =
+                biasedNormalVelocity < 0.0f
+                    ? (1.0f + restitution)
+                    : 1.0f;
+
+            const float requestedNormalImpulse =
+                -restitutionScale * biasedNormalVelocity / denominator;
+
+            const float normalImpulseDelta =
+                ClampAccumulatedImpulseDelta(
+                    point.NormalImpulse,
+                    requestedNormalImpulse,
+                    0.0f,
+                    std::numeric_limits<float>::max());
+
+            point.NormalImpulse += normalImpulseDelta;
+
+            if (std::abs(normalImpulseDelta) <= 1.0e-8f)
             {
                 continue;
             }
 
             const Vec3f impulse =
-                normal * normalImpulseMagnitude;
+                normal * normalImpulseDelta;
 
             if (IsDynamic(bodyA))
             {
@@ -157,12 +179,36 @@ export namespace kairo::foundation::physics
                 VelocityAtPoint(bodyB.State, point.Position) -
                 VelocityAtPoint(bodyA.State, point.Position);
 
-            const Vec3f frictionImpulse =
-                ComputeFrictionImpulse(
-                    postRelativeVelocity,
-                    normal,
-                    std::max(denominator, 1.0e-6f),
-                    dynamicFriction * normalImpulseMagnitude);
+            const Vec3f tangentVelocity =
+                postRelativeVelocity - normal * Dot(postRelativeVelocity, normal);
+
+            const float tangentSpeed =
+                tangentVelocity.Length();
+
+            Vec3f frictionImpulse =
+                Vec3f::Zero();
+
+            if (tangentSpeed > 1.0e-6f)
+            {
+                const Vec3f tangent =
+                    tangentVelocity / tangentSpeed;
+
+                const float requestedTangentImpulse =
+                    -tangentSpeed / std::max(denominator, 1.0e-6f);
+
+                const float maxTangentImpulse =
+                    dynamicFriction * point.NormalImpulse;
+
+                const float tangentImpulseDelta =
+                    ClampAccumulatedImpulseDelta(
+                        point.TangentImpulse,
+                        requestedTangentImpulse,
+                        -maxTangentImpulse,
+                        maxTangentImpulse);
+
+                point.TangentImpulse += tangentImpulseDelta;
+                frictionImpulse = tangent * tangentImpulseDelta;
+            }
 
             if (IsDynamic(bodyA))
             {
@@ -186,19 +232,118 @@ export namespace kairo::foundation::physics
         }
     }
 
+    /// Input: bodies, colliders, and contacts whose points already contain
+    /// cached impulse magnitudes.
+    /// Output: body velocities pre-conditioned by the cached impulses.
+    /// Task: warm start the solver so resting contacts and stacks converge in
+    /// fewer iterations. Tangent direction is reconstructed from the current
+    /// relative velocity, which keeps the cache compact and deterministic.
+    inline void WarmStartContacts(
+        std::vector<RigidBody>& bodies,
+        const std::vector<Collider>& colliders,
+        std::vector<ContactManifold>& contacts)
+    {
+        for (ContactManifold& manifold : contacts)
+        {
+            if (manifold.BodyA >= bodies.size() || manifold.BodyB >= bodies.size())
+            {
+                continue;
+            }
+
+            if (manifold.ColliderA >= colliders.size() || manifold.ColliderB >= colliders.size())
+            {
+                continue;
+            }
+
+            RigidBody& bodyA =
+                bodies.at(manifold.BodyA);
+
+            RigidBody& bodyB =
+                bodies.at(manifold.BodyB);
+
+            if (!IsActiveBody(bodyA) ||
+                !IsActiveBody(bodyB) ||
+                !IsActiveCollider(colliders.at(manifold.ColliderA)) ||
+                !IsActiveCollider(colliders.at(manifold.ColliderB)))
+            {
+                continue;
+            }
+
+            const Matrix3f inverseInertiaA =
+                WorldInverseInertia(bodyA);
+
+            const Matrix3f inverseInertiaB =
+                WorldInverseInertia(bodyB);
+
+            for (ContactPoint& point : manifold.Points)
+            {
+                if (point.NormalImpulse <= 0.0f &&
+                    std::abs(point.TangentImpulse) <= 1.0e-8f)
+                {
+                    continue;
+                }
+
+                const Vec3f normal =
+                    SafeNormalize(point.Normal, Vec3f::Up());
+
+                Vec3f tangentImpulse =
+                    Vec3f::Zero();
+
+                const Vec3f relativeVelocity =
+                    VelocityAtPoint(bodyB.State, point.Position) -
+                    VelocityAtPoint(bodyA.State, point.Position);
+
+                const Vec3f tangentVelocity =
+                    relativeVelocity - normal * Dot(relativeVelocity, normal);
+
+                const float tangentSpeed =
+                    tangentVelocity.Length();
+
+                if (tangentSpeed > 1.0e-6f)
+                {
+                    tangentImpulse =
+                        (tangentVelocity / tangentSpeed) * point.TangentImpulse;
+                }
+
+                const Vec3f totalImpulse =
+                    normal * point.NormalImpulse + tangentImpulse;
+
+                if (IsDynamic(bodyA))
+                {
+                    ApplyImpulseAtPoint(
+                        bodyA.State,
+                        bodyA.Mass.InverseMass,
+                        inverseInertiaA,
+                        -totalImpulse,
+                        point.Position);
+                }
+
+                if (IsDynamic(bodyB))
+                {
+                    ApplyImpulseAtPoint(
+                        bodyB.State,
+                        bodyB.Mass.InverseMass,
+                        inverseInertiaB,
+                        totalImpulse,
+                        point.Position);
+                }
+            }
+        }
+    }
+
     /// Input: bodies, colliders, contacts, settings, and dt.
     /// Output: body velocities modified over multiple solver iterations.
     /// Task: provide a V1 sequential impulse solver without owning the world.
     inline void SolveContacts(
         std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders,
-        const std::vector<ContactManifold>& contacts,
+        std::vector<ContactManifold>& contacts,
         const PhysicsStepSettings& settings,
         float dt)
     {
         for (std::uint32_t iteration = 0; iteration < settings.VelocityIterations; ++iteration)
         {
-            for (const ContactManifold& manifold : contacts)
+            for (ContactManifold& manifold : contacts)
             {
                 SolveContactManifold(bodies, colliders, manifold, settings, dt);
             }

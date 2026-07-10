@@ -1,6 +1,8 @@
 module;
 
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
 #include <stdexcept>
 #include <vector>
 
@@ -156,12 +158,17 @@ export namespace kairo::foundation::physics
             m_LastContacts =
                 ComputeContacts(m_Bodies, m_Colliders, m_LastPairs);
 
+            RestoreContactCache();
+            WarmStartContacts(m_Bodies, m_Colliders, m_LastContacts);
+
             SolveContacts(
                 m_Bodies,
                 m_Colliders,
                 m_LastContacts,
                 Settings,
                 dt);
+
+            StoreContactCache();
 
             CorrectPositions(
                 m_Bodies,
@@ -220,6 +227,19 @@ export namespace kairo::foundation::physics
         BroadphaseWorld m_Broadphase;
         std::vector<BroadphasePair> m_LastPairs;
         std::vector<ContactManifold> m_LastContacts;
+
+        struct ContactCacheEntry final
+        {
+            BodyID BodyA = InvalidBodyID;
+            BodyID BodyB = InvalidBodyID;
+            ColliderID ColliderA = InvalidColliderID;
+            ColliderID ColliderB = InvalidColliderID;
+            std::uint32_t PointIndex = 0;
+            float NormalImpulse = 0.0f;
+            float TangentImpulse = 0.0f;
+        };
+
+        std::vector<ContactCacheEntry> m_ContactCache;
 
         void IntegrateForces(
             float dt)
@@ -299,6 +319,17 @@ export namespace kairo::foundation::physics
                             manifold.ColliderB == collider;
                     }),
                 m_LastContacts.end());
+
+            m_ContactCache.erase(
+                std::remove_if(
+                    m_ContactCache.begin(),
+                    m_ContactCache.end(),
+                    [collider](const ContactCacheEntry& entry)
+                    {
+                        return entry.ColliderA == collider ||
+                            entry.ColliderB == collider;
+                    }),
+                m_ContactCache.end());
         }
 
         void RemoveCachedContactsForBody(
@@ -314,6 +345,116 @@ export namespace kairo::foundation::physics
                             manifold.BodyB == body;
                     }),
                 m_LastContacts.end());
+
+            m_ContactCache.erase(
+                std::remove_if(
+                    m_ContactCache.begin(),
+                    m_ContactCache.end(),
+                    [body](const ContactCacheEntry& entry)
+                    {
+                        return entry.BodyA == body ||
+                            entry.BodyB == body;
+                    }),
+                m_ContactCache.end());
+        }
+
+        [[nodiscard]]
+        static bool SameCacheKey(
+            const ContactCacheEntry& entry,
+            const ContactManifold& manifold,
+            std::uint32_t pointIndex) noexcept
+        {
+            return entry.BodyA == manifold.BodyA &&
+                entry.BodyB == manifold.BodyB &&
+                entry.ColliderA == manifold.ColliderA &&
+                entry.ColliderB == manifold.ColliderB &&
+                entry.PointIndex == pointIndex;
+        }
+
+        void RestoreContactCache()
+        {
+            for (ContactManifold& manifold : m_LastContacts)
+            {
+                for (std::size_t pointIndex = 0; pointIndex < manifold.Points.size(); ++pointIndex)
+                {
+                    ContactPoint& point =
+                        manifold.Points.at(pointIndex);
+
+                    const std::uint32_t stablePointIndex =
+                        static_cast<std::uint32_t>(pointIndex);
+
+                    const auto found =
+                        std::find_if(
+                            m_ContactCache.begin(),
+                            m_ContactCache.end(),
+                            [&manifold, stablePointIndex](const ContactCacheEntry& entry)
+                            {
+                                return SameCacheKey(entry, manifold, stablePointIndex);
+                            });
+
+                    if (found != m_ContactCache.end())
+                    {
+                        point.NormalImpulse = found->NormalImpulse;
+                        point.TangentImpulse = found->TangentImpulse;
+                    }
+                }
+            }
+        }
+
+        void StoreContactCache()
+        {
+            m_ContactCache.clear();
+
+            for (const ContactManifold& manifold : m_LastContacts)
+            {
+                for (std::size_t pointIndex = 0; pointIndex < manifold.Points.size(); ++pointIndex)
+                {
+                    const ContactPoint& point =
+                        manifold.Points.at(pointIndex);
+
+                    if (point.NormalImpulse <= 0.0f &&
+                        std::abs(point.TangentImpulse) <= 1.0e-8f)
+                    {
+                        continue;
+                    }
+
+                    m_ContactCache.push_back(
+                        ContactCacheEntry
+                        {
+                            manifold.BodyA,
+                            manifold.BodyB,
+                            manifold.ColliderA,
+                            manifold.ColliderB,
+                            static_cast<std::uint32_t>(pointIndex),
+                            point.NormalImpulse,
+                            point.TangentImpulse
+                        });
+                }
+            }
+
+            std::sort(
+                m_ContactCache.begin(),
+                m_ContactCache.end(),
+                [](const ContactCacheEntry& lhs, const ContactCacheEntry& rhs)
+                {
+                    if (lhs.BodyA != rhs.BodyA)
+                    {
+                        return lhs.BodyA < rhs.BodyA;
+                    }
+                    if (lhs.BodyB != rhs.BodyB)
+                    {
+                        return lhs.BodyB < rhs.BodyB;
+                    }
+                    if (lhs.ColliderA != rhs.ColliderA)
+                    {
+                        return lhs.ColliderA < rhs.ColliderA;
+                    }
+                    if (lhs.ColliderB != rhs.ColliderB)
+                    {
+                        return lhs.ColliderB < rhs.ColliderB;
+                    }
+                    return lhs.PointIndex < rhs.PointIndex;
+                });
         }
     };
 }
