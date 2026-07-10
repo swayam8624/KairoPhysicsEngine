@@ -304,6 +304,73 @@ TEST_CASE("PhysicsWorld settles falling sphere against plane", "[PhysicsEngine][
     REQUIRE(world.DebugAABBs().size() == 1);
 }
 
+TEST_CASE("Kinematic bodies advance by authored velocity only", "[PhysicsEngine][World]")
+{
+    PhysicsWorld world;
+
+    RigidBodyDesc desc;
+    desc.Type = BodyType::Kinematic;
+    desc.State.Position = Vec3f::Zero();
+    desc.State.LinearVelocity = Vec3f{ 2.0f, 0.0f, 0.0f };
+
+    const BodyID body =
+        world.CreateRigidBody(desc);
+
+    world.Step(0.5f);
+
+    REQUIRE(world.Bodies()[body].State.Position.x == Catch::Approx(1.0f));
+    REQUIRE(world.Bodies()[body].State.Position.y == Catch::Approx(0.0f));
+}
+
+TEST_CASE("Dynamic body damping and velocity clamps are applied", "[PhysicsEngine][World]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+
+    RigidBodyDesc desc =
+        DynamicSphereBody(Vec3f::Zero());
+
+    desc.EnableGravity = false;
+    desc.LinearDamping = 0.0f;
+    desc.MaxLinearSpeed = 10.0f;
+    desc.State.LinearVelocity = Vec3f{ 100.0f, 0.0f, 0.0f };
+
+    const BodyID body =
+        world.CreateRigidBody(desc);
+
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.Bodies()[body].State.LinearVelocity.Length() == Catch::Approx(10.0f).margin(1.0e-4f));
+}
+
+TEST_CASE("Sleeping bodies stop integrating and wake on force", "[PhysicsEngine][World]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.SleepTime = 1.0f / 120.0f;
+    world.Settings.SleepLinearSpeed = 0.1f;
+    world.Settings.SleepAngularSpeed = 0.1f;
+
+    RigidBodyDesc desc =
+        DynamicSphereBody(Vec3f::Zero());
+
+    desc.EnableGravity = false;
+    desc.AllowSleeping = true;
+
+    const BodyID body =
+        world.CreateRigidBody(desc);
+
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.Bodies()[body].Sleeping);
+
+    AddForce(world.Bodies()[body].Forces, Vec3f{ 10.0f, 0.0f, 0.0f });
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(!world.Bodies()[body].Sleeping);
+    REQUIRE(world.Bodies()[body].State.LinearVelocity.x > 0.0f);
+}
+
 TEST_CASE("AABB contacts are detected", "[PhysicsEngine][Narrowphase]")
 {
     const RigidBody a =

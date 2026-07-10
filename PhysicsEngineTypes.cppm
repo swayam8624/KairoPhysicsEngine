@@ -18,6 +18,10 @@ export namespace kairo::foundation::physics
         float Baumgarte = 0.2f;
         float Slop = 0.01f;
         float MaxPositionCorrection = 0.25f;
+        bool EnableSleeping = true;
+        float SleepLinearSpeed = 0.05f;
+        float SleepAngularSpeed = 0.05f;
+        float SleepTime = 0.5f;
     };
 
     /// Input: step settings and timestep.
@@ -33,6 +37,9 @@ export namespace kairo::foundation::physics
         RequireNonNegative(settings.Baumgarte, "Baumgarte");
         RequireNonNegative(settings.Slop, "Slop");
         RequireNonNegative(settings.MaxPositionCorrection, "MaxPositionCorrection");
+        RequireNonNegative(settings.SleepLinearSpeed, "SleepLinearSpeed");
+        RequireNonNegative(settings.SleepAngularSpeed, "SleepAngularSpeed");
+        RequireNonNegative(settings.SleepTime, "SleepTime");
 
         if (settings.VelocityIterations == 0)
         {

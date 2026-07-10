@@ -143,6 +143,21 @@ export namespace kairo::foundation::physics
             RemoveCachedContactsForBody(body);
         }
 
+        /// Input: active body id.
+        /// Output: body marked awake for the next integration pass.
+        /// Task: expose an explicit wake hook for gameplay code, tools, and
+        /// tests without requiring direct mutation of the body record.
+        void WakeBody(
+            BodyID body)
+        {
+            if (!IsValidBody(body))
+            {
+                throw std::out_of_range("WakeBody failed: body id does not exist or is inactive.");
+            }
+
+            WakeRigidBody(m_Bodies.at(body));
+        }
+
         void Step(
             float dt)
         {
@@ -150,6 +165,7 @@ export namespace kairo::foundation::physics
             RequireFinite(Gravity, "Gravity");
 
             IntegrateForces(dt);
+            IntegrateKinematicVelocities(dt);
 
             m_Broadphase.Sync(m_Bodies, m_Colliders);
             m_LastPairs =
@@ -158,6 +174,7 @@ export namespace kairo::foundation::physics
             m_LastContacts =
                 ComputeContacts(m_Bodies, m_Colliders, m_LastPairs);
 
+            WakeContactBodies();
             RestoreContactCache();
             WarmStartContacts(m_Bodies, m_Colliders, m_LastContacts);
 
@@ -175,7 +192,8 @@ export namespace kairo::foundation::physics
                 m_LastContacts,
                 Settings);
 
-            IntegrateVelocities(dt);
+            IntegrateDynamicVelocities(dt);
+            UpdateSleeping(dt);
             ClearForceAccumulators();
         }
 
@@ -246,22 +264,44 @@ export namespace kairo::foundation::physics
         {
             for (RigidBody& body : m_Bodies)
             {
+                if (body.Sleeping && HasAccumulatedForce(body))
+                {
+                    WakeRigidBody(body);
+                }
+
                 if (!IsDynamic(body))
                 {
                     continue;
                 }
 
                 const Vec3f acceleration =
-                    Gravity * Settings.GravityScale +
+                    (body.EnableGravity ? Gravity * (Settings.GravityScale * body.GravityScale) : Vec3f::Zero()) +
                     body.Forces.Force * body.Mass.InverseMass;
 
                 body.State.LinearVelocity += acceleration * dt;
                 body.State.AngularVelocity +=
                     WorldInverseInertia(body) * body.Forces.Torque * dt;
+
+                ApplyVelocityControls(body, dt);
             }
         }
 
-        void IntegrateVelocities(
+        void IntegrateKinematicVelocities(
+            float dt)
+        {
+            for (RigidBody& body : m_Bodies)
+            {
+                if (!IsKinematic(body))
+                {
+                    continue;
+                }
+
+                ApplyVelocityControls(body, dt);
+                AdvanceMotionState(body.State, dt);
+            }
+        }
+
+        void IntegrateDynamicVelocities(
             float dt)
         {
             for (RigidBody& body : m_Bodies)
@@ -271,16 +311,8 @@ export namespace kairo::foundation::physics
                     continue;
                 }
 
-                body.State.Position += body.State.LinearVelocity * dt;
-
-                if (body.State.AngularVelocity.LengthSquared() > 1.0e-12f)
-                {
-                    body.State.Rotation =
-                        IntegrateAngularVelocity(
-                            body.State.Rotation,
-                            body.State.AngularVelocity,
-                            dt);
-                }
+                ApplyVelocityControls(body, dt);
+                AdvanceMotionState(body.State, dt);
             }
         }
 
@@ -289,6 +321,146 @@ export namespace kairo::foundation::physics
             for (RigidBody& body : m_Bodies)
             {
                 ClearForces(body.Forces);
+            }
+        }
+
+        static void AdvanceMotionState(
+            MotionState& state,
+            float dt)
+        {
+            state.Position += state.LinearVelocity * dt;
+
+            if (state.AngularVelocity.LengthSquared() > 1.0e-12f)
+            {
+                state.Rotation =
+                    IntegrateAngularVelocity(
+                        state.Rotation,
+                        state.AngularVelocity,
+                        dt);
+            }
+        }
+
+        static void ClampVelocity(
+            Vec3f& velocity,
+            float maxSpeed)
+        {
+            const float maxSpeedSq =
+                maxSpeed * maxSpeed;
+
+            const float lengthSq =
+                velocity.LengthSquared();
+
+            if (lengthSq > maxSpeedSq)
+            {
+                velocity =
+                    velocity * (maxSpeed / std::sqrt(lengthSq));
+            }
+        }
+
+        static void ApplyVelocityControls(
+            RigidBody& body,
+            float dt)
+        {
+            if (body.LinearDamping > 0.0f)
+            {
+                body.State.LinearVelocity *=
+                    std::exp(-body.LinearDamping * dt);
+            }
+
+            if (body.AngularDamping > 0.0f)
+            {
+                body.State.AngularVelocity *=
+                    std::exp(-body.AngularDamping * dt);
+            }
+
+            ClampVelocity(body.State.LinearVelocity, body.MaxLinearSpeed);
+            ClampVelocity(body.State.AngularVelocity, body.MaxAngularSpeed);
+        }
+
+        void WakeContactBodies()
+        {
+            for (const ContactManifold& manifold : m_LastContacts)
+            {
+                if (manifold.BodyA >= m_Bodies.size() ||
+                    manifold.BodyB >= m_Bodies.size())
+                {
+                    continue;
+                }
+
+                RigidBody& bodyA =
+                    m_Bodies.at(manifold.BodyA);
+
+                RigidBody& bodyB =
+                    m_Bodies.at(manifold.BodyB);
+
+                const bool wakeA =
+                    IsDynamicBodyType(bodyA) &&
+                    bodyA.Sleeping &&
+                    IsDynamicBodyType(bodyB) &&
+                    !bodyB.Sleeping;
+
+                const bool wakeB =
+                    IsDynamicBodyType(bodyB) &&
+                    bodyB.Sleeping &&
+                    IsDynamicBodyType(bodyA) &&
+                    !bodyA.Sleeping;
+
+                if (wakeA)
+                {
+                    WakeRigidBody(bodyA);
+                }
+
+                if (wakeB)
+                {
+                    WakeRigidBody(bodyB);
+                }
+            }
+        }
+
+        void UpdateSleeping(
+            float dt)
+        {
+            for (RigidBody& body : m_Bodies)
+            {
+                if (!IsDynamicBodyType(body))
+                {
+                    continue;
+                }
+
+                if (!Settings.EnableSleeping || !body.AllowSleeping)
+                {
+                    WakeRigidBody(body);
+                    continue;
+                }
+
+                if (HasAccumulatedForce(body))
+                {
+                    WakeRigidBody(body);
+                    continue;
+                }
+
+                const bool slowLinear =
+                    body.State.LinearVelocity.LengthSquared() <=
+                    Settings.SleepLinearSpeed * Settings.SleepLinearSpeed;
+
+                const bool slowAngular =
+                    body.State.AngularVelocity.LengthSquared() <=
+                    Settings.SleepAngularSpeed * Settings.SleepAngularSpeed;
+
+                if (slowLinear && slowAngular)
+                {
+                    body.SleepTimer += dt;
+                    if (body.SleepTimer >= Settings.SleepTime)
+                    {
+                        body.Sleeping = true;
+                        body.State.LinearVelocity = Vec3f::Zero();
+                        body.State.AngularVelocity = Vec3f::Zero();
+                    }
+                }
+                else
+                {
+                    WakeRigidBody(body);
+                }
             }
         }
 
