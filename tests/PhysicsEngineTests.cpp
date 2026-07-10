@@ -47,6 +47,45 @@ TEST_CASE("World creates bodies and colliders", "[PhysicsEngine][World]")
     REQUIRE(world.Colliders().size() == 1);
 }
 
+TEST_CASE("World removes colliders and destroys bodies without reusing ids", "[PhysicsEngine][World]")
+{
+    PhysicsWorld world;
+
+    const BodyID bodyA =
+        world.CreateRigidBody(DynamicSphereBody(Vec3f{ 0.0f, 0.5f, 0.0f }));
+
+    const BodyID bodyB =
+        world.CreateRigidBody(DynamicSphereBody(Vec3f{ 0.75f, 0.5f, 0.0f }));
+
+    const ColliderID colliderA =
+        world.AddCollider(bodyA, SphereCollider{ 0.5f });
+
+    const ColliderID colliderB =
+        world.AddCollider(bodyB, SphereCollider{ 0.5f });
+
+    world.Step(1.0f / 60.0f);
+    REQUIRE(world.IsValidBody(bodyA));
+    REQUIRE(world.IsValidCollider(colliderA));
+    REQUIRE(!world.BroadphasePairs().empty());
+    REQUIRE(!world.Contacts().empty());
+
+    world.RemoveCollider(colliderA);
+    REQUIRE(!world.IsValidCollider(colliderA));
+    REQUIRE(world.IsValidCollider(colliderB));
+    REQUIRE(world.BroadphasePairs().empty());
+    REQUIRE(world.Contacts().empty());
+
+    world.DestroyRigidBody(bodyB);
+    REQUIRE(!world.IsValidBody(bodyB));
+    REQUIRE(!world.IsValidCollider(colliderB));
+    REQUIRE_THROWS_AS(world.AddCollider(bodyB, SphereCollider{ 0.5f }), std::out_of_range);
+
+    const BodyID bodyC =
+        world.CreateRigidBody(DynamicSphereBody(Vec3f{ 2.0f, 0.5f, 0.0f }));
+
+    REQUIRE(bodyC == 2);
+}
+
 TEST_CASE("Broadphase pairs overlapping finite colliders and planes", "[PhysicsEngine][Broadphase]")
 {
     std::vector<RigidBody> bodies;
@@ -237,9 +276,18 @@ TEST_CASE("Invalid world inputs throw", "[PhysicsEngine][Validation]")
     PhysicsWorld world;
     REQUIRE_THROWS_AS(world.Step(0.0f), std::invalid_argument);
     REQUIRE_THROWS_AS(world.AddCollider(42, SphereCollider{ 0.5f }), std::out_of_range);
+    REQUIRE_THROWS_AS(world.RemoveCollider(42), std::out_of_range);
+    REQUIRE_THROWS_AS(world.DestroyRigidBody(42), std::out_of_range);
 
     const BodyID body =
         world.CreateRigidBody(DynamicSphereBody(Vec3f::Zero()));
 
     REQUIRE_THROWS_AS(world.AddCollider(body, SphereCollider{ -1.0f }), std::invalid_argument);
+
+    RigidBodyDesc invalidDynamic;
+    invalidDynamic.Type = BodyType::Dynamic;
+    invalidDynamic.State.Position = Vec3f::Zero();
+    invalidDynamic.Mass = StaticMassProperties();
+
+    REQUIRE_THROWS_AS(world.CreateRigidBody(invalidDynamic), std::invalid_argument);
 }

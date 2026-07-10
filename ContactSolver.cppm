@@ -39,18 +39,25 @@ export namespace kairo::foundation::physics
         RigidBody& bodyB =
             bodies.at(manifold.BodyB);
 
+        if (!IsActiveBody(bodyA) || !IsActiveBody(bodyB))
+        {
+            return;
+        }
+
         if (!IsDynamic(bodyA) && !IsDynamic(bodyB))
         {
             return;
         }
 
         const Collider* colliderA =
-            manifold.ColliderA < colliders.size()
+            manifold.ColliderA < colliders.size() &&
+                IsActiveCollider(colliders.at(manifold.ColliderA))
                 ? &colliders.at(manifold.ColliderA)
                 : nullptr;
 
         const Collider* colliderB =
-            manifold.ColliderB < colliders.size()
+            manifold.ColliderB < colliders.size() &&
+                IsActiveCollider(colliders.at(manifold.ColliderB))
                 ? &colliders.at(manifold.ColliderB)
                 : nullptr;
 
@@ -216,6 +223,11 @@ export namespace kairo::foundation::physics
 
             RigidBody& bodyA = bodies.at(manifold.BodyA);
             RigidBody& bodyB = bodies.at(manifold.BodyB);
+            if (!IsActiveBody(bodyA) || !IsActiveBody(bodyB))
+            {
+                continue;
+            }
+
             const float inverseMassSum =
                 bodyA.Mass.InverseMass + bodyB.Mass.InverseMass;
 

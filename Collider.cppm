@@ -39,6 +39,7 @@ export namespace kairo::foundation::physics
     struct Collider final
     {
         ColliderID ID = InvalidColliderID;
+        bool Active = true;
         BodyID Body = InvalidBodyID;
         Vec3f LocalCenter = Vec3f::Zero();
         ColliderShape Shape = SphereCollider{};
@@ -53,7 +54,21 @@ export namespace kairo::foundation::physics
     inline bool IsInfiniteCollider(
         const Collider& collider) noexcept
     {
-        return std::holds_alternative<PlaneCollider>(collider.Shape);
+        return collider.Active &&
+            std::holds_alternative<PlaneCollider>(collider.Shape);
+    }
+
+    /// Input: collider.
+    /// Output: true when the collider still participates in simulation.
+    /// Task: make collider ids deletion-safe without erasing vector storage or
+    /// changing ids held by user code, debug tools, or contact caches.
+    [[nodiscard]]
+    inline bool IsActiveCollider(
+        const Collider& collider) noexcept
+    {
+        return collider.Active &&
+            collider.ID != InvalidColliderID &&
+            collider.Body != InvalidBodyID;
     }
 
     /// Input: body and collider.
@@ -124,6 +139,6 @@ export namespace kairo::foundation::physics
             plane->Normal = SafeNormalize(plane->Normal, Vec3f::Up());
         }
 
-        return { id, body, localCenter, shape, material, 1u };
+        return { id, true, body, localCenter, shape, material, 1u };
     }
 }

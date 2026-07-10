@@ -39,7 +39,10 @@ export namespace kairo::foundation::physics
         std::vector<DebugAABB> result;
         for (const Collider& collider : colliders)
         {
-            if (collider.Body < bodies.size() && !IsInfiniteCollider(collider))
+            if (IsActiveCollider(collider) &&
+                collider.Body < bodies.size() &&
+                IsActiveBody(bodies.at(collider.Body)) &&
+                !IsInfiniteCollider(collider))
             {
                 result.push_back(
                     DebugAABB

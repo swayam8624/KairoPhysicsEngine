@@ -1,5 +1,6 @@
 module;
 
+#include <algorithm>
 #include <stdexcept>
 #include <vector>
 
@@ -27,6 +28,23 @@ export namespace kairo::foundation::physics
         Vec3f Gravity = DefaultGravity;
 
         [[nodiscard]]
+        bool IsValidBody(
+            BodyID body) const noexcept
+        {
+            return body < m_Bodies.size() &&
+                IsActiveBody(m_Bodies[body]);
+        }
+
+        [[nodiscard]]
+        bool IsValidCollider(
+            ColliderID collider) const noexcept
+        {
+            return collider < m_Colliders.size() &&
+                IsActiveCollider(m_Colliders[collider]) &&
+                IsValidBody(m_Colliders[collider].Body);
+        }
+
+        [[nodiscard]]
         BodyID CreateRigidBody(
             const RigidBodyDesc& desc)
         {
@@ -44,9 +62,9 @@ export namespace kairo::foundation::physics
             PhysicsMaterial material = {},
             const Vec3f& localCenter = Vec3f::Zero())
         {
-            if (body >= m_Bodies.size())
+            if (!IsValidBody(body))
             {
-                throw std::out_of_range("AddCollider failed: body id does not exist.");
+                throw std::out_of_range("AddCollider failed: body id does not exist or is inactive.");
             }
 
             const ColliderID id =
@@ -57,6 +75,70 @@ export namespace kairo::foundation::physics
 
             m_Broadphase.AddOrUpdateCollider(m_Bodies, m_Colliders.back());
             return id;
+        }
+
+        /// Input: active collider id.
+        /// Output: none.
+        /// Task: remove the collider from simulation while preserving stable
+        /// vector-index ids for debug logs, cached contacts, and user handles.
+        void RemoveCollider(
+            ColliderID collider)
+        {
+            if (collider >= m_Colliders.size())
+            {
+                throw std::out_of_range("RemoveCollider failed: collider id does not exist.");
+            }
+
+            Collider& record =
+                m_Colliders.at(collider);
+
+            if (!record.Active)
+            {
+                return;
+            }
+
+            record.Active = false;
+            record.Body = InvalidBodyID;
+            m_Broadphase.RemoveCollider(collider);
+            RemoveCachedPairsForCollider(collider);
+            RemoveCachedContactsForCollider(collider);
+        }
+
+        /// Input: active body id.
+        /// Output: none.
+        /// Task: deactivate a body and every collider attached to it without
+        /// compacting storage. This gives users deletion-safe ids: an old id can
+        /// be tested with `IsValidBody` and never aliases a future body.
+        void DestroyRigidBody(
+            BodyID body)
+        {
+            if (body >= m_Bodies.size())
+            {
+                throw std::out_of_range("DestroyRigidBody failed: body id does not exist.");
+            }
+
+            RigidBody& record =
+                m_Bodies.at(body);
+
+            if (!record.Active)
+            {
+                return;
+            }
+
+            for (Collider& collider : m_Colliders)
+            {
+                if (collider.Active && collider.Body == body)
+                {
+                    RemoveCollider(collider.ID);
+                }
+            }
+
+            record.Active = false;
+            record.Sleeping = true;
+            record.State.LinearVelocity = Vec3f::Zero();
+            record.State.AngularVelocity = Vec3f::Zero();
+            ClearForces(record.Forces);
+            RemoveCachedContactsForBody(body);
         }
 
         void Step(
@@ -188,6 +270,50 @@ export namespace kairo::foundation::physics
             {
                 ClearForces(body.Forces);
             }
+        }
+
+        void RemoveCachedPairsForCollider(
+            ColliderID collider)
+        {
+            m_LastPairs.erase(
+                std::remove_if(
+                    m_LastPairs.begin(),
+                    m_LastPairs.end(),
+                    [collider](const BroadphasePair& pair)
+                    {
+                        return pair.A == collider || pair.B == collider;
+                    }),
+                m_LastPairs.end());
+        }
+
+        void RemoveCachedContactsForCollider(
+            ColliderID collider)
+        {
+            m_LastContacts.erase(
+                std::remove_if(
+                    m_LastContacts.begin(),
+                    m_LastContacts.end(),
+                    [collider](const ContactManifold& manifold)
+                    {
+                        return manifold.ColliderA == collider ||
+                            manifold.ColliderB == collider;
+                    }),
+                m_LastContacts.end());
+        }
+
+        void RemoveCachedContactsForBody(
+            BodyID body)
+        {
+            m_LastContacts.erase(
+                std::remove_if(
+                    m_LastContacts.begin(),
+                    m_LastContacts.end(),
+                    [body](const ContactManifold& manifold)
+                    {
+                        return manifold.BodyA == body ||
+                            manifold.BodyB == body;
+                    }),
+                m_LastContacts.end());
         }
     };
 }

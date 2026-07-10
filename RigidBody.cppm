@@ -1,5 +1,6 @@
 module;
 
+#include <stdexcept>
 #include <vector>
 
 export module Kairo.Foundation.PhysicsEngine.RigidBody;
@@ -22,6 +23,7 @@ export namespace kairo::foundation::physics
     struct RigidBody final
     {
         BodyID ID = InvalidBodyID;
+        bool Active = true;
         BodyType Type = BodyType::Dynamic;
         MotionState State;
         MassProperties Mass = StaticMassProperties();
@@ -36,9 +38,22 @@ export namespace kairo::foundation::physics
     inline bool IsDynamic(
         const RigidBody& body) noexcept
     {
-        return body.Type == BodyType::Dynamic &&
+        return body.Active &&
+            body.Type == BodyType::Dynamic &&
             body.Mass.InverseMass > 0.0f &&
             !body.Sleeping;
+    }
+
+    /// Input: body.
+    /// Output: true when the record is still owned by the world.
+    /// Task: preserve stable vector-index ids while allowing deletion-safe
+    /// handles. Removed bodies stay in storage but are ignored by simulation.
+    [[nodiscard]]
+    inline bool IsActiveBody(
+        const RigidBody& body) noexcept
+    {
+        return body.Active &&
+            body.ID != InvalidBodyID;
     }
 
     /// Input: body.
@@ -68,8 +83,21 @@ export namespace kairo::foundation::physics
     {
         RigidBody body;
         body.ID = id;
+        body.Active = true;
         body.Type = desc.Type;
         body.State = desc.State;
+
+        RequireFinite(body.State.Position, "RigidBodyDesc.State.Position");
+        RequireFinite(body.State.LinearVelocity, "RigidBodyDesc.State.LinearVelocity");
+        RequireFinite(body.State.AngularVelocity, "RigidBodyDesc.State.AngularVelocity");
+
+        if (desc.Type == BodyType::Dynamic && desc.Mass.InverseMass <= 0.0f)
+        {
+            throw std::invalid_argument(
+                "Dynamic rigid bodies require finite positive mass. "
+                "Use BodyType::Static for immovable bodies.");
+        }
+
         body.Mass = desc.Type == BodyType::Dynamic ? desc.Mass : StaticMassProperties();
         return body;
     }

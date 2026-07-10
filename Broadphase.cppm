@@ -61,7 +61,9 @@ export namespace kairo::foundation::physics
             BroadphaseProxy& proxy =
                 m_Proxies.at(collider.ID);
 
-            if (collider.Body >= bodies.size())
+            if (!IsActiveCollider(collider) ||
+                collider.Body >= bodies.size() ||
+                !IsActiveBody(bodies.at(collider.Body)))
             {
                 RemoveCollider(collider.ID);
                 return;
@@ -214,8 +216,12 @@ export namespace kairo::foundation::physics
 
             const Collider& ca = colliders.at(a);
             const Collider& cb = colliders.at(b);
-            return ca.Body < bodies.size() &&
+            return IsActiveCollider(ca) &&
+                IsActiveCollider(cb) &&
+                ca.Body < bodies.size() &&
                 cb.Body < bodies.size() &&
+                IsActiveBody(bodies.at(ca.Body)) &&
+                IsActiveBody(bodies.at(cb.Body)) &&
                 ca.Body != cb.Body &&
                 (ca.LayerMask & cb.LayerMask) != 0u;
         }

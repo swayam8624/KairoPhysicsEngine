@@ -29,6 +29,14 @@ export namespace kairo::foundation::physics
         const RigidBody& bodyB,
         const Collider& colliderB)
     {
+        if (!IsActiveBody(bodyA) ||
+            !IsActiveBody(bodyB) ||
+            !IsActiveCollider(colliderA) ||
+            !IsActiveCollider(colliderB))
+        {
+            return std::nullopt;
+        }
+
         ContactManifold manifold =
             MakeContactManifold(
                 bodyA.ID,
@@ -241,7 +249,13 @@ export namespace kairo::foundation::physics
             const Collider& b =
                 colliders.at(pair.B);
 
-            if (a.Body == b.Body)
+            if (!IsActiveCollider(a) ||
+                !IsActiveCollider(b) ||
+                a.Body >= bodies.size() ||
+                b.Body >= bodies.size() ||
+                !IsActiveBody(bodies.at(a.Body)) ||
+                !IsActiveBody(bodies.at(b.Body)) ||
+                a.Body == b.Body)
             {
                 continue;
             }
