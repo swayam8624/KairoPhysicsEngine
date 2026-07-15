@@ -245,6 +245,8 @@ export namespace kairo::foundation::physics::sandbox
 
                 if (step < settings.Steps)
                 {
+                    scene.Projectiles.Step(scene.World, settings.FixedDt);
+                    scene.Water.Step(scene.World, settings.FixedDt);
                     scene.World.Step(settings.FixedDt);
                 }
             }

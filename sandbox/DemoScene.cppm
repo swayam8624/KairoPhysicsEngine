@@ -11,6 +11,7 @@ export module Kairo.Foundation.PhysicsSandbox.DemoScene;
 
 import Kairo.Foundation.Math.Quaternion;
 import Kairo.Foundation.Math.Vector;
+import Kairo.Foundation.Geometry.AABB;
 import Kairo.Foundation.PhysicsMath;
 import Kairo.Foundation.PhysicsEngine;
 import Kairo.Foundation.PhysicsSandbox.Types;
@@ -316,6 +317,38 @@ export namespace kairo::foundation::physics::sandbox
                     'o');
             }
         }
+
+        void BuildProjectileWall(SandboxScene& scene, bool trigger)
+        {
+            scene.World.Gravity = Vec3f::Zero();
+            const BodyID target = scene.World.CreateRigidBody(StaticBody(Vec3f{ 3.0f, 1.0f, 0.0f }));
+            const ColliderID collider = scene.World.AddCollider(
+                target, trigger ? ColliderShape{ SphereCollider{ 0.6f } } : ColliderShape{ AABBCollider{ Vec3f{ 0.08f, 1.0f, 1.0f } } });
+            scene.World.SetCollisionFilter(collider, trigger ? CollisionLayer::Trigger : CollisionLayer::StaticWorld, CollisionLayer::All);
+            scene.World.SetColliderTrigger(collider, trigger);
+
+            ProjectileDesc projectile;
+            projectile.Mode = ProjectileMode::Ballistic;
+            projectile.Position = Vec3f{ -3.0f, 1.0f, 0.0f };
+            projectile.Velocity = Vec3f{ 40.0f, 0.0f, 0.0f };
+            projectile.Radius = 0.08f;
+            projectile.Response = trigger ? ProjectileImpactResponse::Pierce : ProjectileImpactResponse::Destroy;
+            projectile.Lifetime = 1.0f;
+            projectile.MaxDistance = 20.0f;
+            [[maybe_unused]] const ProjectileID projectileID =
+                scene.Projectiles.Spawn(projectile);
+        }
+
+        void BuildWaterBuoyancy(SandboxScene& scene)
+        {
+            scene.World.Gravity = Vec3f{ 0.0f, -9.81f, 0.0f };
+            const TrackedBody floatBody = AddSphere(scene, "floating_sphere", Vec3f{ 0.0f, 0.25f, 0.0f }, 0.5f, 'o');
+            [[maybe_unused]] const WaterVolumeID waterVolume = scene.Water.AddWaterVolume({
+                AABBf::FromMinMax(Vec3f{ -4.0f, -1.0f, -2.0f }, Vec3f{ 4.0f, 1.0f, 2.0f }),
+                1.0f, 1.25f, 0.3f, CollisionLayer::Fluid
+            });
+            scene.Water.RegisterBody(floatBody.Body, { 1.0f, 1.0f, 1.0f, 1.0f });
+        }
     }
 
     using namespace detail;
@@ -345,6 +378,12 @@ export namespace kairo::foundation::physics::sandbox
             return "stress-100";
         case SandboxScenario::Stress500Spheres:
             return "stress-500";
+        case SandboxScenario::ProjectileWall:
+            return "projectile-wall";
+        case SandboxScenario::TriggerVolume:
+            return "trigger-volume";
+        case SandboxScenario::WaterBuoyancy:
+            return "water-buoyancy";
         }
 
         return "unknown";
@@ -390,6 +429,9 @@ export namespace kairo::foundation::physics::sandbox
         {
             return SandboxScenario::Stress500Spheres;
         }
+        if (name == "projectile-wall") { return SandboxScenario::ProjectileWall; }
+        if (name == "trigger-volume") { return SandboxScenario::TriggerVolume; }
+        if (name == "water-buoyancy") { return SandboxScenario::WaterBuoyancy; }
 
         throw std::invalid_argument(
             "Unknown sandbox scenario '" + std::string(name) + "'.");
@@ -441,6 +483,18 @@ export namespace kairo::foundation::physics::sandbox
             scene.Description = "500 sphere broadphase stress setup";
             BuildSphereStress(scene, 500);
             break;
+        case SandboxScenario::ProjectileWall:
+            scene.Description = "continuous swept-sphere projectile against a thin static wall";
+            BuildProjectileWall(scene, false);
+            break;
+        case SandboxScenario::TriggerVolume:
+            scene.Description = "piercing projectile generating a trigger-volume hit";
+            BuildProjectileWall(scene, true);
+            break;
+        case SandboxScenario::WaterBuoyancy:
+            scene.Description = "submerged sphere with buoyancy and drag forces";
+            BuildWaterBuoyancy(scene);
+            break;
         }
 
         return scene;
@@ -454,6 +508,7 @@ export namespace kairo::foundation::physics::sandbox
     {
         return
             "falling-sphere, sphere-collision, box-stack, friction-ramp, "
-            "restitution-test, sleeping-test, stress-100, stress-500";
+            "restitution-test, sleeping-test, stress-100, stress-500, "
+            "projectile-wall, trigger-volume, water-buoyancy";
     }
 }

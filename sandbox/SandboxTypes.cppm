@@ -27,7 +27,10 @@ export namespace kairo::foundation::physics::sandbox
         RestitutionTest,
         SleepingTest,
         Stress100Spheres,
-        Stress500Spheres
+        Stress500Spheres,
+        ProjectileWall,
+        TriggerVolume,
+        WaterBuoyancy
     };
 
     /// Runtime controls for deterministic sandbox playback.
@@ -69,6 +72,8 @@ export namespace kairo::foundation::physics::sandbox
     struct SandboxScene final
     {
         PhysicsWorld World;
+        ProjectileSystem Projectiles;
+        BuoyancySystem Water;
         std::vector<TrackedBody> TrackedBodies;
         std::string Name;
         std::string Description;

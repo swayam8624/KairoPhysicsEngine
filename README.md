@@ -45,6 +45,9 @@ restitution-test
 sleeping-test
 stress-100
 stress-500
+projectile-wall
+trigger-volume
+water-buoyancy
 ```
 
 Terminal output includes frame stats, tracked body transforms/velocities, and
