@@ -861,6 +861,45 @@ TEST_CASE("World raycasts validate inputs and respect max distance", "[PhysicsEn
     REQUIRE_FALSE(world.Raycast(Vec3f{ -2.0f, 0.0f, 0.0f }, Vec3f::UnitX(), 1.0f).has_value());
 }
 
+TEST_CASE("World accelerated overlap queries and rays track direct transform edits", "[PhysicsEngine][World][Queries]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+
+    const BodyID nearBody =
+        world.CreateRigidBody(DynamicSphereBody(Vec3f{ 0.0f, 1.0f, 0.0f }, 0.5f));
+    const BodyID farBody =
+        world.CreateRigidBody(DynamicSphereBody(Vec3f{ 20.0f, 1.0f, 0.0f }, 0.5f));
+    const BodyID planeBody =
+        world.CreateRigidBody(StaticBody());
+
+    const ColliderID nearCollider =
+        world.AddCollider(nearBody, SphereCollider{ 0.5f });
+    [[maybe_unused]] const ColliderID farCollider =
+        world.AddCollider(farBody, SphereCollider{ 0.5f });
+    const ColliderID planeCollider =
+        world.AddCollider(planeBody, PlaneCollider{ Vec3f::Up(), 0.0f });
+
+    REQUIRE(world.QueryAABB(
+        AABBf::FromCenterExtent(Vec3f{ 0.0f, 1.0f, 0.0f }, Vec3f{ 1.0f, 1.0f, 1.0f })) ==
+        std::vector<ColliderID>{ nearCollider });
+    REQUIRE(world.QuerySphere(Vec3f{ 0.0f, 1.0f, 0.0f }, 1.0f) ==
+        std::vector<ColliderID>{ nearCollider });
+
+    const std::vector<PhysicsRayHit> initialHits =
+        world.RaycastAll(Vec3f{ -2.0f, 1.0f, 0.0f }, Vec3f::UnitX(), 4.0f);
+    REQUIRE(initialHits.size() == 1u);
+    REQUIRE(initialHits.front().Collider == nearCollider);
+
+    world.Bodies()[nearBody].State.Position = Vec3f{ 5.0f, 1.0f, 0.0f };
+    REQUIRE_FALSE(world.Raycast(Vec3f{ -2.0f, 1.0f, 0.0f }, Vec3f::UnitX(), 4.0f).has_value());
+
+    const auto planeHit =
+        world.Raycast(Vec3f{ 0.0f, 2.0f, 0.0f }, -Vec3f::Up(), 4.0f);
+    REQUIRE(planeHit.has_value());
+    REQUIRE(planeHit->Collider == planeCollider);
+}
+
 TEST_CASE("World reports deterministic contact begin stay and end events", "[PhysicsEngine][World]")
 {
     PhysicsWorld world;

@@ -7,6 +7,7 @@ module;
 export module Kairo.Foundation.PhysicsEngine.Broadphase;
 
 import Kairo.Foundation.Spatial;
+import Kairo.Foundation.Math.Vector;
 import Kairo.Foundation.PhysicsMath;
 import Kairo.Foundation.PhysicsEngine.RigidBody;
 import Kairo.Foundation.PhysicsEngine.Collider;
@@ -71,6 +72,9 @@ export namespace kairo::foundation::physics
                 return;
             }
 
+            const std::uint32_t categoryMask =
+                BroadphaseCategoryMask(collider);
+
             if (IsInfiniteCollider(collider))
             {
                 if (proxy.InTree)
@@ -81,15 +85,13 @@ export namespace kairo::foundation::physics
                 proxy.Proxy = spatial::SpatialInvalidIndex;
                 proxy.InTree = false;
                 proxy.Infinite = true;
+                proxy.CategoryMask = categoryMask;
                 AddInfinite(collider.ID);
                 return;
             }
 
             const spatial::SpatialAABB bounds =
                 WorldAABB(bodies.at(collider.Body), collider);
-
-            const std::uint32_t categoryMask =
-                BroadphaseCategoryMask(collider);
 
             if (proxy.InTree && proxy.CategoryMask == categoryMask)
             {
@@ -180,6 +182,64 @@ export namespace kairo::foundation::physics
 
             SortUnique(pairs);
             return pairs;
+        }
+
+        /// Input: finite world-space bounds and a caller layer mask.
+        /// Output: candidate finite collider IDs from the dynamic AABB tree.
+        /// Task: keep PhysicsWorld overlap queries proportional to spatial
+        /// locality. The returned IDs are conservative candidates; callers
+        /// must still test the actual collider shape when that distinction
+        /// matters.
+        [[nodiscard]]
+        std::vector<ColliderID> QueryAABB(
+            const spatial::SpatialAABB& query,
+            std::uint32_t layerMask) const
+        {
+            return m_Tree.QueryAABB(query, layerMask).IDs;
+        }
+
+        /// Input: sphere center/radius and a caller layer mask.
+        /// Output: finite collider IDs whose broadphase bounds overlap it.
+        /// Task: provide the query primitive needed by radial gameplay effects,
+        /// sensors, and future particle/cloth collision systems without a
+        /// linear scan through every collider.
+        [[nodiscard]]
+        std::vector<ColliderID> QuerySphere(
+            const Vec3f& center,
+            float radius,
+            std::uint32_t layerMask) const
+        {
+            return m_Tree.QuerySphere(center, radius, layerMask).IDs;
+        }
+
+        /// Input: normalized ray, finite/positive maximum distance, and layer mask.
+        /// Output: all finite-tree candidates plus every active infinite collider.
+        /// Task: defer exact shape intersection to PhysicsWorld while avoiding a
+        /// full collider scan for the common finite-body case. Planes remain
+        /// explicit candidates because an infinite plane cannot enter an AABB tree.
+        [[nodiscard]]
+        std::vector<ColliderID> RaycastCandidates(
+            const spatial::SpatialRay& ray,
+            float maxDistance,
+            std::uint32_t layerMask) const
+        {
+            std::vector<ColliderID> candidates =
+                m_Tree.QueryRay(ray, maxDistance, layerMask).IDs;
+
+            for (const ColliderID collider : m_InfiniteColliders)
+            {
+                if (collider < m_Proxies.size() &&
+                    (m_Proxies.at(collider).CategoryMask & layerMask) != 0u)
+                {
+                    candidates.push_back(collider);
+                }
+            }
+
+            std::sort(candidates.begin(), candidates.end());
+            candidates.erase(
+                std::unique(candidates.begin(), candidates.end()),
+                candidates.end());
+            return candidates;
         }
 
     private:

@@ -17,6 +17,7 @@ export module Kairo.Foundation.PhysicsEngine.World;
 
 import Kairo.Foundation.Math.Vector;
 import Kairo.Foundation.Geometry.AABB;
+import Kairo.Foundation.Spatial;
 import Kairo.Foundation.PhysicsMath;
 import Kairo.Foundation.PhysicsEngine.Types;
 import Kairo.Foundation.PhysicsEngine.Material;
@@ -708,10 +709,17 @@ export namespace kairo::foundation::physics
             const AABBf& query,
             std::uint32_t layerMask = 0xFFFF'FFFFu) const
         {
+            SyncBroadphaseForQueries();
             std::vector<ColliderID> result;
-            for (const Collider& collider : m_Colliders)
+            for (const ColliderID candidate : m_Broadphase.QueryAABB(query, layerMask))
             {
-                if (!IsValidCollider(collider.ID) ||
+                if (!IsValidCollider(candidate))
+                {
+                    continue;
+                }
+
+                const Collider& collider = m_Colliders.at(candidate);
+                if (
                     IsInfiniteCollider(collider) ||
                     (BroadphaseCategoryMask(collider) & layerMask) == 0u)
                 {
@@ -735,14 +743,21 @@ export namespace kairo::foundation::physics
         {
             RequireFinite(center, "QuerySphere.center");
             RequirePositive(radius, "QuerySphere.radius");
+            SyncBroadphaseForQueries();
 
             std::vector<ColliderID> result;
             const float radiusSq =
                 radius * radius;
 
-            for (const Collider& collider : m_Colliders)
+            for (const ColliderID candidate : m_Broadphase.QuerySphere(center, radius, layerMask))
             {
-                if (!IsValidCollider(collider.ID) ||
+                if (!IsValidCollider(candidate))
+                {
+                    continue;
+                }
+
+                const Collider& collider = m_Colliders.at(candidate);
+                if (
                     IsInfiniteCollider(collider) ||
                     (BroadphaseCategoryMask(collider) & layerMask) == 0u)
                 {
@@ -802,11 +817,23 @@ export namespace kairo::foundation::physics
                 ValidateRayDirection(direction);
             const float rayMaxDistance =
                 ValidateRayMaxDistance(maxDistance);
+            SyncBroadphaseForQueries();
 
             std::vector<PhysicsRayHit> result;
-            for (const Collider& collider : m_Colliders)
+            const spatial::SpatialRay ray{
+                origin,
+                rayDirection
+            };
+            for (const ColliderID candidate :
+                m_Broadphase.RaycastCandidates(ray, rayMaxDistance, layerMask))
             {
-                if (!IsValidCollider(collider.ID) ||
+                if (!IsValidCollider(candidate))
+                {
+                    continue;
+                }
+
+                const Collider& collider = m_Colliders.at(candidate);
+                if (
                     collider.ID == ignoredCollider ||
                     (BroadphaseCategoryMask(collider) & layerMask) == 0u)
                 {
@@ -845,7 +872,7 @@ export namespace kairo::foundation::physics
     private:
         std::vector<RigidBody> m_Bodies;
         std::vector<Collider> m_Colliders;
-        BroadphaseWorld m_Broadphase;
+        mutable BroadphaseWorld m_Broadphase;
         std::vector<BroadphasePair> m_LastPairs;
         std::vector<ContactManifold> m_LastContacts;
         std::vector<PhysicsContactEvent> m_LastEvents;
@@ -880,6 +907,17 @@ export namespace kairo::foundation::physics
         };
 
         std::vector<ContactCacheEntry> m_ContactCache;
+
+        /// Input: none; this is a logically-const maintenance operation.
+        /// Output: the persistent dynamic tree reflects current body transforms.
+        /// Task: callers may edit bodies through `Bodies()` between simulation
+        /// steps. Query APIs must still remain correct, so they synchronize the
+        /// broadphase before asking it for candidates rather than trusting a
+        /// stale proxy from the last physics step.
+        void SyncBroadphaseForQueries() const
+        {
+            m_Broadphase.Sync(m_Bodies, m_Colliders);
+        }
 
         template<typename ClockTimePoint>
         [[nodiscard]]

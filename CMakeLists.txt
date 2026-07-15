@@ -15,18 +15,6 @@ elseif(MSVC)
     add_compile_options(/W4)
 endif()
 
-if(KAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX)
-    find_package(glfw3 QUIET)
-    find_package(OpenGL QUIET)
-
-    if(glfw3_FOUND AND OpenGL_FOUND)
-        add_executable(KairoPhysicsGlfwSandbox sandbox/KairoPhysicsGlfwSandbox.cpp)
-        target_link_libraries(KairoPhysicsGlfwSandbox PRIVATE KairoPhysicsEngine glfw OpenGL::GL)
-    else()
-        message(STATUS "KairoPhysicsGlfwSandbox skipped: GLFW or OpenGL not found.")
-    endif()
-endif()
-
 if(NOT TARGET KairoPhysicsMath)
     set(KAIRO_PHYSICS_MATH_SOURCE_DIR "" CACHE PATH "Path to a local KairoPhysicsMath checkout")
 
@@ -83,6 +71,20 @@ target_sources(KairoPhysicsEngine
 )
 
 target_link_libraries(KairoPhysicsEngine PUBLIC KairoPhysicsMath KairoSpatial)
+
+# The debug window consumes the engine target, so it must be declared only
+# after the module library and its dependency graph are complete.
+if(KAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX)
+    find_package(glfw3 QUIET)
+    find_package(OpenGL QUIET)
+
+    if(glfw3_FOUND AND OpenGL_FOUND)
+        add_executable(KairoPhysicsGlfwSandbox sandbox/KairoPhysicsGlfwSandbox.cpp)
+        target_link_libraries(KairoPhysicsGlfwSandbox PRIVATE KairoPhysicsEngine glfw OpenGL::GL)
+    else()
+        message(STATUS "KairoPhysicsGlfwSandbox skipped: GLFW or OpenGL not found.")
+    endif()
+endif()
 
 if(KAIRO_PHYSICS_ENGINE_BUILD_SANDBOX)
     add_library(KairoPhysicsSandboxCore)
