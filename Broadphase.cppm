@@ -212,6 +212,34 @@ export namespace kairo::foundation::physics
             return m_Tree.QuerySphere(center, radius, layerMask).IDs;
         }
 
+        /// Input: conservative finite bounds and a caller layer mask.
+        /// Output: tree candidates plus infinite colliders whose category matches.
+        /// Task: serve swept-volume queries. Infinite planes must be included
+        /// explicitly because they intentionally have no finite tree proxy.
+        [[nodiscard]]
+        std::vector<ColliderID> QueryAABBCandidates(
+            const spatial::SpatialAABB& query,
+            std::uint32_t layerMask) const
+        {
+            std::vector<ColliderID> candidates =
+                m_Tree.QueryAABB(query, layerMask).IDs;
+
+            for (const ColliderID collider : m_InfiniteColliders)
+            {
+                if (collider < m_Proxies.size() &&
+                    (m_Proxies.at(collider).CategoryMask & layerMask) != 0u)
+                {
+                    candidates.push_back(collider);
+                }
+            }
+
+            std::sort(candidates.begin(), candidates.end());
+            candidates.erase(
+                std::unique(candidates.begin(), candidates.end()),
+                candidates.end());
+            return candidates;
+        }
+
         /// Input: normalized ray, finite/positive maximum distance, and layer mask.
         /// Output: all finite-tree candidates plus every active infinite collider.
         /// Task: defer exact shape intersection to PhysicsWorld while avoiding a

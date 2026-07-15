@@ -898,6 +898,48 @@ TEST_CASE("World raycasts validate inputs and respect max distance", "[PhysicsEn
     REQUIRE_FALSE(world.Raycast(Vec3f{ -2.0f, 0.0f, 0.0f }, Vec3f::UnitX(), 1.0f).has_value());
 }
 
+TEST_CASE("World swept spheres report deterministic continuous impacts", "[PhysicsEngine][World][Sweeps]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+
+    const BodyID sphereBody =
+        world.CreateRigidBody(StaticBody(Vec3f{ 3.0f, 1.0f, 0.0f }));
+    const BodyID capsuleBody =
+        world.CreateRigidBody(StaticBody(Vec3f{ 6.0f, 1.0f, 0.0f }));
+    const BodyID floorBody =
+        world.CreateRigidBody(StaticBody());
+
+    const ColliderID sphere =
+        world.AddCollider(sphereBody, SphereCollider{ 0.5f });
+    const ColliderID capsule =
+        world.AddCollider(capsuleBody, CapsuleCollider{ 0.5f, 0.75f });
+    [[maybe_unused]] const ColliderID floor =
+        world.AddCollider(floorBody, PlaneCollider{ Vec3f::Up(), 0.0f });
+
+    const auto sphereHit =
+        world.SweepSphere(Vec3f{ 0.0f, 1.0f, 0.0f }, Vec3f{ 5.0f, 0.0f, 0.0f }, 0.25f);
+    REQUIRE(sphereHit.has_value());
+    REQUIRE(sphereHit->Collider == sphere);
+    REQUIRE(sphereHit->Distance == Catch::Approx(2.25f).margin(1.0e-3f));
+    REQUIRE(sphereHit->Normal.x == Catch::Approx(-1.0f).margin(1.0e-3f));
+
+    const auto capsuleRay =
+        world.Raycast(Vec3f{ 4.0f, 1.0f, 0.0f }, Vec3f::UnitX(), 4.0f);
+    REQUIRE(capsuleRay.has_value());
+    REQUIRE(capsuleRay->Collider == capsule);
+
+    const auto planeHit =
+        world.SweepSphere(Vec3f{ 0.0f, 2.0f, 0.0f }, Vec3f{ 0.0f, -3.0f, 0.0f }, 0.5f);
+    REQUIRE(planeHit.has_value());
+    REQUIRE(planeHit->Distance == Catch::Approx(1.5f).margin(1.0e-3f));
+    REQUIRE(planeHit->Normal.y == Catch::Approx(1.0f).margin(1.0e-3f));
+
+    REQUIRE_THROWS_AS(
+        world.SweepSphere(Vec3f::Zero(), Vec3f::Zero(), 0.5f),
+        std::invalid_argument);
+}
+
 TEST_CASE("World accelerated overlap queries and rays track direct transform edits", "[PhysicsEngine][World][Queries]")
 {
     PhysicsWorld world;

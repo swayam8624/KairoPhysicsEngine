@@ -65,6 +65,23 @@ export namespace kairo::foundation::physics
         bool IsTrigger = false;
     };
 
+    /// Input: a moving sphere query issued against the current PhysicsWorld.
+    /// Output: first time-of-impact in normalized [0, 1] sweep time and world
+    /// contact data. `Distance` is measured along the supplied displacement.
+    /// Task: provide the minimum continuous query needed by ballistic
+    /// projectiles and a future capsule-controller implementation without
+    /// pretending discrete rigid-body contacts prevent tunnelling.
+    struct PhysicsSweepHit final
+    {
+        BodyID Body = InvalidBodyID;
+        ColliderID Collider = InvalidColliderID;
+        Vec3f Point = Vec3f::Zero();
+        Vec3f Normal = Vec3f::UnitX();
+        float Distance = 0.0f;
+        float TimeOfImpact = 0.0f;
+        bool IsTrigger = false;
+    };
+
     /// Input: one completed `PhysicsWorld::Step`.
     /// Output: wall-clock timings for the major engine phases in milliseconds.
     /// Task: support benchmark CSV output without forcing sandbox tools to
@@ -869,6 +886,67 @@ export namespace kairo::foundation::physics
             return result;
         }
 
+        /// Input: start point, complete world-space displacement, positive
+        /// moving-sphere radius, optional layer mask, and ignored collider.
+        /// Output: nearest continuous sphere hit, or `std::nullopt`.
+        /// Task: query a conservative swept AABB through the broadphase, then
+        /// use a bounded conservative-advancement narrowphase against exact
+        /// sphere, capsule, plane, AABB, and oriented-box distance functions.
+        /// The method is deterministic and reports initial overlap at TOI zero.
+        [[nodiscard]]
+        std::optional<PhysicsSweepHit> SweepSphere(
+            const Vec3f& start,
+            const Vec3f& displacement,
+            float radius,
+            std::uint32_t layerMask = 0xFFFF'FFFFu,
+            ColliderID ignoredCollider = InvalidColliderID) const
+        {
+            RequireFinite(start, "SweepSphere.start");
+            RequireFinite(displacement, "SweepSphere.displacement");
+            RequirePositive(radius, "SweepSphere.radius");
+
+            const float travelDistance = displacement.Length();
+            if (!std::isfinite(travelDistance) || travelDistance <= 1.0e-8f)
+            {
+                throw std::invalid_argument("SweepSphere.displacement must be non-zero.");
+            }
+
+            SyncBroadphaseForQueries();
+            const Vec3f end = start + displacement;
+            const Vec3f extent{ radius, radius, radius };
+            const AABBf sweptBounds = AABBf::FromMinMax(
+                Min(start, end) - extent,
+                Max(start, end) + extent);
+
+            std::optional<PhysicsSweepHit> closest;
+            for (const ColliderID candidate :
+                m_Broadphase.QueryAABBCandidates(sweptBounds, layerMask))
+            {
+                if (!IsValidCollider(candidate))
+                {
+                    continue;
+                }
+
+                const Collider& collider = m_Colliders.at(candidate);
+                if (candidate == ignoredCollider ||
+                    (BroadphaseCategoryMask(collider) & layerMask) == 0u)
+                {
+                    continue;
+                }
+
+                const auto hit = SweepSphereCollider(
+                    m_Bodies.at(collider.Body), collider, start, displacement, radius);
+                if (!hit || (closest && hit->Distance >= closest->Distance))
+                {
+                    continue;
+                }
+
+                closest = *hit;
+            }
+
+            return closest;
+        }
+
     private:
         std::vector<RigidBody> m_Bodies;
         std::vector<Collider> m_Colliders;
@@ -1367,6 +1445,78 @@ export namespace kairo::foundation::physics
         }
 
         [[nodiscard]]
+        static bool RaycastCapsule(
+            const Vec3f& origin,
+            const Vec3f& direction,
+            const CapsuleSegment& capsule,
+            float maxDistance,
+            float& distance,
+            Vec3f& normal)
+        {
+            const Vec3f axis = capsule.B - capsule.A;
+            const Vec3f originOffset = origin - capsule.A;
+            const float axisLengthSq = axis.LengthSquared();
+            if (axisLengthSq <= 1.0e-12f)
+            {
+                return RaycastSphere(
+                    origin, direction, capsule.A, capsule.Radius,
+                    maxDistance, distance, normal);
+            }
+
+            const float axisDirection = Dot(axis, direction);
+            const float axisOrigin = Dot(axis, originOffset);
+            const float rayOrigin = Dot(direction, originOffset);
+            const float originLengthSq = originOffset.LengthSquared();
+            const float quadraticA = axisLengthSq - axisDirection * axisDirection;
+            const float quadraticB = axisLengthSq * rayOrigin - axisOrigin * axisDirection;
+            const float quadraticC = axisLengthSq * originLengthSq - axisOrigin * axisOrigin -
+                capsule.Radius * capsule.Radius * axisLengthSq;
+            const float discriminant = quadraticB * quadraticB - quadraticA * quadraticC;
+
+            if (std::abs(quadraticA) > 1.0e-10f && discriminant >= 0.0f)
+            {
+                const float candidate = (-quadraticB - std::sqrt(discriminant)) / quadraticA;
+                const float axial = axisOrigin + candidate * axisDirection;
+                if (candidate >= 0.0f && candidate <= maxDistance &&
+                    axial >= 0.0f && axial <= axisLengthSq)
+                {
+                    distance = candidate;
+                    const Vec3f point = origin + direction * distance;
+                    const Vec3f center = capsule.A + axis * (axial / axisLengthSq);
+                    normal = SafeNormalize(point - center, -direction);
+                    return true;
+                }
+            }
+
+            float firstDistance = std::numeric_limits<float>::infinity();
+            float secondDistance = std::numeric_limits<float>::infinity();
+            Vec3f firstNormal = -direction;
+            Vec3f secondNormal = -direction;
+            const bool firstHit = RaycastSphere(
+                origin, direction, capsule.A, capsule.Radius,
+                maxDistance, firstDistance, firstNormal);
+            const bool secondHit = RaycastSphere(
+                origin, direction, capsule.B, capsule.Radius,
+                maxDistance, secondDistance, secondNormal);
+            if (!firstHit && !secondHit)
+            {
+                return false;
+            }
+
+            if (firstHit && (!secondHit || firstDistance <= secondDistance))
+            {
+                distance = firstDistance;
+                normal = firstNormal;
+            }
+            else
+            {
+                distance = secondDistance;
+                normal = secondNormal;
+            }
+            return true;
+        }
+
+        [[nodiscard]]
         static bool RaycastPlane(
             const Vec3f& origin,
             const Vec3f& direction,
@@ -1479,7 +1629,17 @@ export namespace kairo::foundation::physics
                         sphere->Radius,
                         maxDistance,
                         distance,
-                        normal);
+                    normal);
+            }
+            else if (const auto* capsule = std::get_if<CapsuleCollider>(&collider.Shape))
+            {
+                intersects = RaycastCapsule(
+                    origin,
+                    direction,
+                    WorldCapsuleSegment(body, collider, *capsule),
+                    maxDistance,
+                    distance,
+                    normal);
             }
             else if (const auto* box = std::get_if<AABBCollider>(&collider.Shape))
             {
@@ -1532,6 +1692,107 @@ export namespace kairo::foundation::physics
             };
 
             return true;
+        }
+
+        [[nodiscard]]
+        static float PointColliderSeparation(
+            const RigidBody& body,
+            const Collider& collider,
+            const Vec3f& point,
+            const Vec3f& fallbackNormal,
+            Vec3f& normal)
+        {
+            const Vec3f center = WorldColliderCenter(body, collider);
+            if (const auto* sphere = std::get_if<SphereCollider>(&collider.Shape))
+            {
+                const Vec3f delta = point - center;
+                const float distance = delta.Length();
+                normal = SafeNormalize(delta, fallbackNormal);
+                return std::max(0.0f, distance - sphere->Radius);
+            }
+
+            if (const auto* capsule = std::get_if<CapsuleCollider>(&collider.Shape))
+            {
+                const CapsuleSegment segment = WorldCapsuleSegment(body, collider, *capsule);
+                const Vec3f closest = ClosestPointOnSegment(segment.A, segment.B, point);
+                const Vec3f delta = point - closest;
+                const float distance = delta.Length();
+                normal = SafeNormalize(delta, fallbackNormal);
+                return std::max(0.0f, distance - capsule->Radius);
+            }
+
+            if (const auto* plane = std::get_if<PlaneCollider>(&collider.Shape))
+            {
+                const float signedDistance = Dot(plane->Normal, point) + plane->Distance;
+                normal = signedDistance >= 0.0f ? plane->Normal : -plane->Normal;
+                return std::abs(signedDistance);
+            }
+
+            OrientedBoxFrame box;
+            if (const auto* aabb = std::get_if<AABBCollider>(&collider.Shape))
+            {
+                box = { center, { Vec3f::UnitX(), Vec3f::UnitY(), Vec3f::UnitZ() }, aabb->HalfExtents };
+            }
+            else if (const auto* oriented = std::get_if<BoxCollider>(&collider.Shape))
+            {
+                box = WorldBoxFrame(body, collider, oriented->HalfExtents);
+            }
+            else
+            {
+                normal = fallbackNormal;
+                return std::numeric_limits<float>::infinity();
+            }
+
+            const Vec3f closest = ClosestPointOnBox(box, point);
+            const Vec3f delta = point - closest;
+            const float distance = delta.Length();
+            normal = distance > 1.0e-6f
+                ? delta / distance
+                : SphereBoxFallbackNormal(box, point);
+            return distance;
+        }
+
+        [[nodiscard]]
+        static std::optional<PhysicsSweepHit> SweepSphereCollider(
+            const RigidBody& body,
+            const Collider& collider,
+            const Vec3f& start,
+            const Vec3f& displacement,
+            float radius)
+        {
+            const float travelDistance = displacement.Length();
+            const Vec3f direction = displacement / travelDistance;
+            float time = 0.0f;
+            constexpr float tolerance = 1.0e-4f;
+
+            for (int iteration = 0; iteration < 48; ++iteration)
+            {
+                const Vec3f center = start + displacement * time;
+                Vec3f normal = -direction;
+                const float separation = PointColliderSeparation(
+                    body, collider, center, -direction, normal) - radius;
+
+                if (separation <= tolerance)
+                {
+                    return PhysicsSweepHit{
+                        body.ID,
+                        collider.ID,
+                        center - normal * radius,
+                        normal,
+                        time * travelDistance,
+                        time,
+                        collider.IsTrigger
+                    };
+                }
+
+                time += separation / travelDistance;
+                if (time > 1.0f)
+                {
+                    return std::nullopt;
+                }
+            }
+
+            return std::nullopt;
         }
 
         void IntegrateForces(
