@@ -4,6 +4,7 @@ module;
 #include <cmath>
 #include <limits>
 #include <optional>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -82,6 +83,149 @@ export namespace kairo::foundation::physics
         }
 
         return closest;
+    }
+
+    [[nodiscard]]
+    inline Vec3f ClosestPointOnSegment(
+        const Vec3f& a,
+        const Vec3f& b,
+        const Vec3f& point)
+    {
+        const Vec3f edge = b - a;
+        const float lengthSq = edge.LengthSquared();
+        if (lengthSq <= 1.0e-12f)
+        {
+            return a;
+        }
+
+        const float t = std::clamp(Dot(point - a, edge) / lengthSq, 0.0f, 1.0f);
+        return a + edge * t;
+    }
+
+    [[nodiscard]]
+    inline std::pair<Vec3f, Vec3f> ClosestPointsOnSegments(
+        const Vec3f& a0,
+        const Vec3f& a1,
+        const Vec3f& b0,
+        const Vec3f& b1)
+    {
+        const Vec3f da = a1 - a0;
+        const Vec3f db = b1 - b0;
+        const Vec3f offset = a0 - b0;
+        const float aa = Dot(da, da);
+        const float bb = Dot(db, db);
+        const float ab = Dot(da, db);
+        const float ao = Dot(da, offset);
+        const float bo = Dot(db, offset);
+        const float denominator = aa * bb - ab * ab;
+
+        float ta = 0.0f;
+        float tb = 0.0f;
+        if (aa > 1.0e-12f && bb > 1.0e-12f)
+        {
+            if (std::abs(denominator) > 1.0e-12f)
+            {
+                ta = std::clamp((ab * bo - bb * ao) / denominator, 0.0f, 1.0f);
+            }
+            tb = std::clamp((ab * ta + bo) / bb, 0.0f, 1.0f);
+            ta = std::clamp((ab * tb - ao) / aa, 0.0f, 1.0f);
+        }
+        else if (aa > 1.0e-12f)
+        {
+            ta = std::clamp(-ao / aa, 0.0f, 1.0f);
+        }
+        else if (bb > 1.0e-12f)
+        {
+            tb = std::clamp(bo / bb, 0.0f, 1.0f);
+        }
+
+        return { a0 + da * ta, b0 + db * tb };
+    }
+
+    [[nodiscard]]
+    inline std::pair<Vec3f, Vec3f> ClosestSegmentBoxPoints(
+        const CapsuleSegment& capsule,
+        const OrientedBoxFrame& box)
+    {
+        // Squared distance from a point on a segment to a convex box is a
+        // convex one-dimensional function. Ternary minimization is stable here
+        // and avoids a separate, error-prone segment-vs-OBB clipping path.
+        float lower = 0.0f;
+        float upper = 1.0f;
+        const Vec3f edge = capsule.B - capsule.A;
+        for (int iteration = 0; iteration < 32; ++iteration)
+        {
+            const float first = lower + (upper - lower) / 3.0f;
+            const float second = upper - (upper - lower) / 3.0f;
+            const Vec3f pointFirst = capsule.A + edge * first;
+            const Vec3f pointSecond = capsule.A + edge * second;
+            const float distanceFirst = (ClosestPointOnBox(box, pointFirst) - pointFirst).LengthSquared();
+            const float distanceSecond = (ClosestPointOnBox(box, pointSecond) - pointSecond).LengthSquared();
+            if (distanceFirst <= distanceSecond)
+            {
+                upper = second;
+            }
+            else
+            {
+                lower = first;
+            }
+        }
+
+        const Vec3f segmentPoint = capsule.A + edge * ((lower + upper) * 0.5f);
+        return { segmentPoint, ClosestPointOnBox(box, segmentPoint) };
+    }
+
+    [[nodiscard]]
+    inline std::optional<ContactPoint> MakeCapsuleSphereContact(
+        const CapsuleSegment& capsule,
+        const Vec3f& sphereCenter,
+        float sphereRadius,
+        bool normalFromCapsuleToSphere)
+    {
+        const Vec3f capsulePoint =
+            ClosestPointOnSegment(capsule.A, capsule.B, sphereCenter);
+        const Vec3f delta = sphereCenter - capsulePoint;
+        const float radiusSum = capsule.Radius + sphereRadius;
+        const float distanceSq = delta.LengthSquared();
+        if (distanceSq >= radiusSum * radiusSum)
+        {
+            return std::nullopt;
+        }
+
+        const float distance = std::sqrt(std::max(distanceSq, 0.0f));
+        const Vec3f capsuleToSphere =
+            distance > 1.0e-6f ? delta / distance : Vec3f::Up();
+        const Vec3f normal = normalFromCapsuleToSphere ? capsuleToSphere : -capsuleToSphere;
+        return MakeContactPoint(
+            capsulePoint + capsuleToSphere * (capsule.Radius - 0.5f * (radiusSum - distance)),
+            normal,
+            radiusSum - distance);
+    }
+
+    [[nodiscard]]
+    inline std::optional<ContactPoint> MakeCapsuleBoxContact(
+        const CapsuleSegment& capsule,
+        const OrientedBoxFrame& box,
+        bool normalFromCapsuleToBox)
+    {
+        const auto [capsulePoint, boxPoint] =
+            ClosestSegmentBoxPoints(capsule, box);
+        const Vec3f delta = boxPoint - capsulePoint;
+        const float distanceSq = delta.LengthSquared();
+        if (distanceSq >= capsule.Radius * capsule.Radius)
+        {
+            return std::nullopt;
+        }
+
+        const float distance = std::sqrt(std::max(distanceSq, 0.0f));
+        const Vec3f capsuleToBox = distance > 1.0e-6f
+            ? delta / distance
+            : -SafeNormalize(capsulePoint - box.Center, box.Axes[0]);
+        const Vec3f normal = normalFromCapsuleToBox ? capsuleToBox : -capsuleToBox;
+        return MakeContactPoint(
+            (capsulePoint + capsuleToBox * capsule.Radius + boxPoint) * 0.5f,
+            normal,
+            capsule.Radius - distance);
     }
 
     [[nodiscard]]
@@ -283,6 +427,82 @@ export namespace kairo::foundation::physics
 
         const Vec3f centerB =
             WorldColliderCenter(bodyB, colliderB);
+
+        if (const auto* capsuleA = std::get_if<CapsuleCollider>(&colliderA.Shape))
+        {
+            const CapsuleSegment segmentA =
+                WorldCapsuleSegment(bodyA, colliderA, *capsuleA);
+
+            if (const auto* sphereB = std::get_if<SphereCollider>(&colliderB.Shape))
+            {
+                const auto point = MakeCapsuleSphereContact(segmentA, centerB, sphereB->Radius, true);
+                if (point) { manifold.Points.push_back(*point); return manifold; }
+                return std::nullopt;
+            }
+
+            if (const auto* capsuleB = std::get_if<CapsuleCollider>(&colliderB.Shape))
+            {
+                const CapsuleSegment segmentB = WorldCapsuleSegment(bodyB, colliderB, *capsuleB);
+                const auto [pointA, pointB] = ClosestPointsOnSegments(segmentA.A, segmentA.B, segmentB.A, segmentB.B);
+                const Vec3f delta = pointB - pointA;
+                const float radiusSum = capsuleA->Radius + capsuleB->Radius;
+                const float distanceSq = delta.LengthSquared();
+                if (distanceSq >= radiusSum * radiusSum) { return std::nullopt; }
+                const float distance = std::sqrt(std::max(distanceSq, 0.0f));
+                const Vec3f normal = distance > 1.0e-6f ? delta / distance : Vec3f::Up();
+                manifold.Points.push_back(MakeContactPoint(
+                    pointA + normal * (capsuleA->Radius - 0.5f * (radiusSum - distance)),
+                    normal,
+                    radiusSum - distance));
+                return manifold;
+            }
+
+            if (const auto* planeB = std::get_if<PlaneCollider>(&colliderB.Shape))
+            {
+                const float signedA = Dot(planeB->Normal, segmentA.A) + planeB->Distance;
+                const float signedB = Dot(planeB->Normal, segmentA.B) + planeB->Distance;
+                const Vec3f closest = signedA <= signedB ? segmentA.A : segmentA.B;
+                const float signedDistance = std::min(signedA, signedB);
+                const float penetration = capsuleA->Radius - signedDistance;
+                if (penetration <= 0.0f) { return std::nullopt; }
+                manifold.Points.push_back(MakeContactPoint(
+                    closest - planeB->Normal * capsuleA->Radius,
+                    -planeB->Normal,
+                    penetration));
+                return manifold;
+            }
+
+            if (const auto* boxB = std::get_if<BoxCollider>(&colliderB.Shape))
+            {
+                const auto point = MakeCapsuleBoxContact(
+                    segmentA, WorldBoxFrame(bodyB, colliderB, boxB->HalfExtents), true);
+                if (point) { manifold.Points.push_back(*point); return manifold; }
+                return std::nullopt;
+            }
+
+            if (const auto* boxB = std::get_if<AABBCollider>(&colliderB.Shape))
+            {
+                const OrientedBoxFrame frameB{ centerB, { Vec3f::UnitX(), Vec3f::UnitY(), Vec3f::UnitZ() }, boxB->HalfExtents };
+                const auto point = MakeCapsuleBoxContact(segmentA, frameB, true);
+                if (point) { manifold.Points.push_back(*point); return manifold; }
+                return std::nullopt;
+            }
+        }
+
+        if (std::holds_alternative<CapsuleCollider>(colliderB.Shape))
+        {
+            const auto swapped = CollidePair(bodyB, colliderB, bodyA, colliderA);
+            if (!swapped) { return std::nullopt; }
+            ContactManifold result = MakeContactManifold(
+                bodyA.ID, bodyB.ID, colliderA.ID, colliderB.ID,
+                colliderA.IsTrigger || colliderB.IsTrigger);
+            for (ContactPoint point : swapped->Points)
+            {
+                point.Normal = -point.Normal;
+                result.Points.push_back(point);
+            }
+            return result;
+        }
 
         if (const auto* sphereA = std::get_if<SphereCollider>(&colliderA.Shape))
         {

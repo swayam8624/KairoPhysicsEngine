@@ -189,6 +189,43 @@ TEST_CASE("Narrowphase creates sphere and plane contacts", "[PhysicsEngine][Narr
     REQUIRE(contact->Points[0].Normal.y == Catch::Approx(-1.0f));
 }
 
+TEST_CASE("Capsule colliders provide bounds and contact all V1 rigid shapes", "[PhysicsEngine][Narrowphase]")
+{
+    const RigidBody capsuleBody =
+        MakeRigidBody(0, DynamicSphereBody(Vec3f{ 0.0f, 0.4f, 0.0f }));
+    const RigidBody sphereBody =
+        MakeRigidBody(1, DynamicSphereBody(Vec3f{ 0.8f, 0.4f, 0.0f }));
+    const RigidBody planeBody =
+        MakeRigidBody(2, StaticBody());
+    const RigidBody boxBody =
+        MakeRigidBody(3, StaticBody(Vec3f{ 0.6f, 0.4f, 0.0f }));
+
+    const Collider capsule =
+        MakeCollider(0, 0, CapsuleCollider{ 0.5f, 0.6f });
+    const Collider sphere =
+        MakeCollider(1, 1, SphereCollider{ 0.5f });
+    const Collider plane =
+        MakeCollider(2, 2, PlaneCollider{ Vec3f::Up(), 0.0f });
+    const Collider box =
+        MakeCollider(3, 3, BoxCollider{ Vec3f{ 0.35f, 0.35f, 0.35f } });
+
+    const AABBf bounds = WorldAABB(capsuleBody, capsule);
+    REQUIRE(bounds.Min.y == Catch::Approx(-0.7f));
+    REQUIRE(bounds.Max.y == Catch::Approx(1.5f));
+
+    const auto capsuleSphere = CollidePair(capsuleBody, capsule, sphereBody, sphere);
+    const auto capsulePlane = CollidePair(capsuleBody, capsule, planeBody, plane);
+    const auto capsuleBox = CollidePair(capsuleBody, capsule, boxBody, box);
+    const auto sphereCapsule = CollidePair(sphereBody, sphere, capsuleBody, capsule);
+
+    REQUIRE(capsuleSphere.has_value());
+    REQUIRE(capsulePlane.has_value());
+    REQUIRE(capsuleBox.has_value());
+    REQUIRE(sphereCapsule.has_value());
+    REQUIRE(capsuleSphere->Points.front().Normal.x == Catch::Approx(1.0f));
+    REQUIRE(sphereCapsule->Points.front().Normal.x == Catch::Approx(-1.0f));
+}
+
 TEST_CASE("Narrowphase keeps plane contact normals stable when pairs are swapped", "[PhysicsEngine][Narrowphase]")
 {
     const RigidBody sphereBody =

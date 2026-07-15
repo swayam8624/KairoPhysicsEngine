@@ -61,6 +61,18 @@ export namespace kairo::foundation::physics
         float Radius = 0.5f;
     };
 
+    /// A capsule aligned to its local Y axis.
+    ///
+    /// `HalfHeight` is the half-length of the straight center segment, not the
+    /// half of the total rounded height. Its total world-space height is
+    /// `2 * (HalfHeight + Radius)`. This convention keeps a zero-height capsule
+    /// equivalent to a sphere while remaining convenient for character shapes.
+    struct CapsuleCollider final
+    {
+        float Radius = 0.5f;
+        float HalfHeight = 0.5f;
+    };
+
     struct PlaneCollider final
     {
         Vec3f Normal = Vec3f::Up();
@@ -78,7 +90,7 @@ export namespace kairo::foundation::physics
     };
 
     using ColliderShape =
-        std::variant<SphereCollider, PlaneCollider, AABBCollider, BoxCollider>;
+        std::variant<SphereCollider, CapsuleCollider, PlaneCollider, AABBCollider, BoxCollider>;
 
     struct Collider final
     {
@@ -200,6 +212,31 @@ export namespace kairo::foundation::physics
         Vec3f HalfExtents = Vec3f{ 0.5f, 0.5f, 0.5f };
     };
 
+    struct CapsuleSegment final
+    {
+        Vec3f A = Vec3f::Zero();
+        Vec3f B = Vec3f::Zero();
+        float Radius = 0.5f;
+    };
+
+    /// Input: owning body, capsule collider, and optional child transform.
+    /// Output: world-space endpoints of the capsule's straight center segment.
+    /// Task: centralize the local-Y convention used by collision, ray, sweep,
+    /// debug, and future character-controller code paths.
+    [[nodiscard]]
+    inline CapsuleSegment WorldCapsuleSegment(
+        const RigidBody& body,
+        const Collider& collider,
+        const CapsuleCollider& capsule)
+    {
+        const Vec3f center = WorldColliderCenter(body, collider);
+        const Vec3f axis = SafeNormalize(
+            Rotate(WorldColliderRotation(body, collider), Vec3f::UnitY()),
+            Vec3f::UnitY());
+        const Vec3f halfSegment = axis * capsule.HalfHeight;
+        return { center - halfSegment, center + halfSegment, capsule.Radius };
+    }
+
     /// Input: body, collider, and box half extents.
     /// Output: OBB center, orthonormal axes, and extents in world space.
     /// Task: prepare BoxCollider data for broadphase bounds and SAT narrowphase.
@@ -241,6 +278,19 @@ export namespace kairo::foundation::physics
             return AABBf::FromCenterExtent(
                 center,
                 Vec3f{ sphere->Radius, sphere->Radius, sphere->Radius });
+        }
+
+        if (const auto* capsule = std::get_if<CapsuleCollider>(&collider.Shape))
+        {
+            RequirePositive(capsule->Radius, "CapsuleCollider.Radius");
+            RequireNonNegative(capsule->HalfHeight, "CapsuleCollider.HalfHeight");
+
+            const CapsuleSegment segment =
+                WorldCapsuleSegment(body, collider, *capsule);
+            const Vec3f extents =
+                Abs((segment.B - segment.A) * 0.5f) +
+                Vec3f{ capsule->Radius, capsule->Radius, capsule->Radius };
+            return AABBf::FromCenterExtent((segment.A + segment.B) * 0.5f, extents);
         }
 
         if (const auto* box = std::get_if<AABBCollider>(&collider.Shape))
@@ -289,6 +339,11 @@ export namespace kairo::foundation::physics
         if (const auto* sphere = std::get_if<SphereCollider>(&shape))
         {
             RequirePositive(sphere->Radius, "SphereCollider.Radius");
+        }
+        else if (const auto* capsule = std::get_if<CapsuleCollider>(&shape))
+        {
+            RequirePositive(capsule->Radius, "CapsuleCollider.Radius");
+            RequireNonNegative(capsule->HalfHeight, "CapsuleCollider.HalfHeight");
         }
         else if (const auto* box = std::get_if<AABBCollider>(&shape))
         {
