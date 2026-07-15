@@ -7,6 +7,7 @@ module;
 export module Kairo.Foundation.PhysicsEngine.Collider;
 
 import Kairo.Foundation.Math.Vector;
+import Kairo.Foundation.Math.Quaternion;
 import Kairo.Foundation.Geometry.Sphere;
 import Kairo.Foundation.Geometry.Plane;
 import Kairo.Foundation.Geometry.AABB;
