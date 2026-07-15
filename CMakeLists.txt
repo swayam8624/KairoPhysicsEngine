@@ -9,6 +9,11 @@ option(KAIRO_PHYSICS_ENGINE_BUILD_TESTS "Build KairoPhysicsEngine tests" ${PROJE
 option(KAIRO_PHYSICS_ENGINE_BUILD_SANDBOX "Build terminal KairoPhysicsEngine sandbox" ${PROJECT_IS_TOP_LEVEL})
 option(KAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX "Build GLFW KairoPhysicsEngine debug sandbox when GLFW is available" ${PROJECT_IS_TOP_LEVEL})
 
+# Immutable standalone fallback revisions. The superproject supplies local
+# targets; these pins make a direct clone deterministic when it does not.
+set(KAIRO_PHYSICS_ENGINE_PHYSICS_MATH_REVISION c00344da162ad485d1a0344b98dc41885d5dc973)
+set(KAIRO_PHYSICS_ENGINE_SPATIAL_REVISION 52dedf416ac52aae30b82b99e374715b66b285aa)
+
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     add_compile_options(-Wall -Wextra -Wno-unused-parameter)
 elseif(MSVC)
@@ -27,7 +32,8 @@ if(NOT TARGET KairoPhysicsMath)
         FetchContent_Declare(
             KairoPhysicsMath
             GIT_REPOSITORY https://github.com/swayam8624/KairoPhysicsMath.git
-            GIT_TAG main
+            GIT_TAG ${KAIRO_PHYSICS_ENGINE_PHYSICS_MATH_REVISION}
+            GIT_SHALLOW TRUE
         )
         FetchContent_MakeAvailable(KairoPhysicsMath)
     endif()
@@ -45,7 +51,8 @@ if(NOT TARGET KairoSpatial)
         FetchContent_Declare(
             KairoSpatial
             GIT_REPOSITORY https://github.com/swayam8624/KairoSpatial.git
-            GIT_TAG main
+            GIT_TAG ${KAIRO_PHYSICS_ENGINE_SPATIAL_REVISION}
+            GIT_SHALLOW TRUE
         )
         FetchContent_MakeAvailable(KairoSpatial)
     endif()
