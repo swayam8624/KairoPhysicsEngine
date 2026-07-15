@@ -12,7 +12,7 @@ option(KAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX "Build GLFW KairoPhysicsEngine de
 # Immutable standalone fallback revisions. The superproject supplies local
 # targets; these pins make a direct clone deterministic when it does not.
 set(KAIRO_PHYSICS_ENGINE_PHYSICS_MATH_REVISION 88df8508a4c311a731226056d79054a859466e8c)
-set(KAIRO_PHYSICS_ENGINE_SPATIAL_REVISION af1525ce94f3027da7bcf573135128e3ae02f88a)
+set(KAIRO_PHYSICS_ENGINE_SPATIAL_REVISION bf238e02cc0b78e07c37a51c5343b726c4b29347)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     add_compile_options(-Wall -Wextra -Wno-unused-parameter)
