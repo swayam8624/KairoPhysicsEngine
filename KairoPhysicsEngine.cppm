@@ -10,3 +10,4 @@ export import Kairo.Foundation.PhysicsEngine.ContactSolver;
 export import Kairo.Foundation.PhysicsEngine.Debug;
 export import Kairo.Foundation.PhysicsEngine.World;
 export import Kairo.Foundation.PhysicsEngine.Projectile;
+export import Kairo.Foundation.PhysicsEngine.Buoyancy;

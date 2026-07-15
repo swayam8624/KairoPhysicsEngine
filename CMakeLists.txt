@@ -68,6 +68,7 @@ target_sources(KairoPhysicsEngine
             PhysicsDebug.cppm
             PhysicsWorld.cppm
             ProjectileSystem.cppm
+            Buoyancy.cppm
             KairoPhysicsEngine.cppm
 )
 

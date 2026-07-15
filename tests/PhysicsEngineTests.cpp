@@ -977,6 +977,46 @@ TEST_CASE("Projectile system handles hitscan ballistic owner ignore and trigger 
     REQUIRE_THROWS_AS(projectiles.Spawn(invalid), std::invalid_argument);
 }
 
+TEST_CASE("Buoyancy volumes apply submersion forces and lifecycle events", "[PhysicsEngine][Buoyancy]")
+{
+    PhysicsWorld world;
+    world.Settings.EnableSleeping = false;
+
+    RigidBodyDesc desc = DynamicSphereBody(Vec3f{ 0.0f, 0.0f, 0.0f }, 0.5f);
+    desc.EnableGravity = false;
+    desc.State.LinearVelocity = Vec3f{ 2.0f, 0.0f, 0.0f };
+    const BodyID body = world.CreateRigidBody(desc);
+    [[maybe_unused]] const ColliderID collider = world.AddCollider(body, SphereCollider{ 0.5f });
+
+    BuoyancySystem water;
+    WaterVolumeDesc volume;
+    volume.Bounds = AABBf::FromMinMax(Vec3f{ -2.0f, -1.0f, -2.0f }, Vec3f{ 2.0f, 1.0f, 2.0f });
+    volume.Density = 1.0f;
+    volume.LinearDrag = 2.0f;
+    const WaterVolumeID volumeID = water.AddWaterVolume(volume);
+    water.RegisterBody(body, BuoyancyBodyDesc{ 1.0f, 1.0f, 1.0f, 1.0f });
+
+    water.Step(world, 1.0f / 60.0f);
+    REQUIRE(water.LastEvents().size() == 1u);
+    REQUIRE(water.LastEvents().front().Volume == volumeID);
+    REQUIRE(water.LastEvents().front().Type == WaterVolumeEventType::Enter);
+    world.Step(1.0f / 60.0f);
+    REQUIRE(world.Bodies()[body].State.LinearVelocity.y > 0.0f);
+    REQUIRE(world.Bodies()[body].State.LinearVelocity.x < 2.0f);
+
+    water.Step(world, 1.0f / 60.0f);
+    REQUIRE(water.LastEvents().front().Type == WaterVolumeEventType::Stay);
+
+    world.Bodies()[body].State.Position = Vec3f{ 10.0f, 0.0f, 0.0f };
+    water.Step(world, 1.0f / 60.0f);
+    REQUIRE(water.LastEvents().size() == 1u);
+    REQUIRE(water.LastEvents().front().Type == WaterVolumeEventType::Exit);
+
+    WaterVolumeDesc invalid = volume;
+    invalid.Density = 0.0f;
+    REQUIRE_THROWS_AS(water.AddWaterVolume(invalid), std::invalid_argument);
+}
+
 TEST_CASE("World swept spheres report deterministic continuous impacts", "[PhysicsEngine][World][Sweeps]")
 {
     PhysicsWorld world;
