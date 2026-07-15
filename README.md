@@ -31,6 +31,7 @@ Run the terminal sandbox:
 ./build/KairoPhysicsSandbox restitution-test --steps 240 --every 40
 ./build/KairoPhysicsSandbox sleeping-test --steps 420 --every 60
 ./build/KairoPhysicsSandbox stress-100 --steps 180 --every 30 --csv outputs/stress_100.csv
+./build/KairoPhysicsSandbox stress-500 --steps 180 --every 30 --csv outputs/stress_500.csv
 ```
 
 Terminal scenarios:
@@ -107,6 +108,7 @@ Stable vector-index body/collider ids with inactive deletion-safe records
 Dynamic, static, and kinematic body behavior
 Per-body gravity scale, damping, max velocity clamps, sleeping, and wake hooks
 Sphere, plane, AABB, and oriented BoxCollider shapes
+CapsuleCollider with sphere/capsule/plane/AABB/oriented-box contacts
 Collider local center and local rotation
 BelongsTo / CollidesWith collision filters
 Built-in CollisionLayer bits for player/projectile/trigger/sensor/cloth/fluid/particle categories
@@ -126,7 +128,10 @@ Fixed timestep accumulator through PhysicsWorld::StepFixed
 Frame contact events: Begin, Stay, End
 Overlap queries: QueryAABB and QuerySphere
 Physics rays: Raycast nearest hit and RaycastAll sorted hit list
-Renderer-agnostic debug contacts and AABBs
+Broadphase-backed overlap/raycast candidates plus continuous SweepSphere queries
+Dedicated ProjectileSystem: hitscan/ballistic motion, owner ignore, masks, impulses, bounce/pierce/destroy, callbacks
+BuoyancySystem: AABB water volumes, displaced-volume buoyancy, drag, Enter/Stay/Exit events
+Renderer-agnostic debug contacts, AABBs, and exact collider-shape snapshots
 Terminal and GLFW debug sandboxes
 Modular terminal sandbox core with scenarios, ASCII rendering, and CSV benchmark output
 Catch2 regression tests
@@ -138,12 +143,14 @@ Catch2 regression tests
 PhysicsEngineTypes   step settings, fixed-step validation, sleep thresholds
 PhysicsMaterial      restitution/friction coefficients and mixing
 RigidBody            body records, active flags, sleep/wake helpers
-Collider             sphere/plane/AABB/box colliders, filters, world bounds
+Collider             sphere/capsule/plane/AABB/box colliders, filters, world bounds
 Broadphase           persistent KairoSpatial DynamicAABBTree pair generation
 Narrowphase          exact V1 contact generation and box SAT
 ContactSolver        warm-started sequential impulses and position correction
 PhysicsDebug         renderer-agnostic debug contacts and AABBs
-PhysicsWorld         ownership, fixed stepping, events, collision response rules, overlap/raycast queries, sandbox-facing API
+PhysicsWorld         ownership, fixed stepping, events, collision response rules, overlap/raycast/sweep queries, sandbox-facing API
+ProjectileSystem     continuous gameplay projectile lifecycle and impact behavior
+Buoyancy             gameplay water volumes, buoyancy force, drag, volume events
 ```
 
 Sandbox module map:
@@ -312,14 +319,54 @@ std::vector<ColliderID> hits =
 
 Queries currently use active finite collider AABBs. Infinite planes are excluded.
 
+`SweepSphere` is the continuous-query bridge for fast gameplay objects. It
+accelerates candidates through the same dynamic AABB tree, includes planes, and
+then performs exact shape-distance advancement:
+
+```cpp
+const auto hit = world.SweepSphere(
+    muzzlePosition,
+    launchVelocity * dt,
+    projectileRadius,
+    CollisionLayer::StaticWorld | CollisionLayer::DynamicWorld,
+    ownerCollider);
+```
+
+Use `ProjectileSystem` when a projectile needs lifecycle management rather than
+hand-writing a sweep every frame:
+
+```cpp
+ProjectileSystem projectiles;
+ProjectileDesc round;
+round.Mode = ProjectileMode::Ballistic;
+round.Position = muzzlePosition;
+round.Velocity = launchVelocity;
+round.IgnoredOwnerCollider = ownerCollider;
+projectiles.Spawn(round);
+
+projectiles.Step(world, dt); // before or after world.Step(dt), by game policy
+world.Step(dt);
+```
+
+Gameplay water is intentionally separate from particle fluids. Configure its
+physical displaced volume explicitly, then apply it before the rigid-body step:
+
+```cpp
+BuoyancySystem water;
+water.AddWaterVolume({ .Bounds = waterBounds, .Density = 1.0f });
+water.RegisterBody(boatBody, { .DisplacedVolume = 2.4f });
+
+water.Step(world, dt);
+world.Step(dt);
+```
+
 ## Current Limits
 
 Still deferred:
 
 ```text
-Capsule collider in engine narrowphase
 Convex hulls, mesh colliders, GJK, EPA
-Continuous collision detection
+Continuous dynamic rigid-body CCD beyond query/projectile sweeps
 Island solver and parallel island dispatch
 Joints and articulated constraints
 Persistent multi-point contact manifolds
@@ -338,7 +385,7 @@ should be separate modules that reuse the same world/query/event conventions:
 ```text
 KairoParticles      particle emitters, forces, constraints, collision events
 KairoCloth          mass-spring or XPBD cloth, cloth collision, tearing later
-KairoFluids         SPH or grid fluids, buoyancy, surface interaction
+KairoFluids         SPH or grid fluids, rigid-body coupling, surface interaction
 KairoDestruction    fracture pieces, debris, sleeping/island integration
 KairoVehicles       raycast wheels, suspension, tire friction curves
 ```

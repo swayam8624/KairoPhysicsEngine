@@ -1,0 +1,5 @@
+scene stress-500
+description 500 spheres used for broadphase and sequential-impulse benchmark CSV runs
+steps 180
+dt 0.0166667
+benchmark true

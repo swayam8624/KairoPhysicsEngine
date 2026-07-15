@@ -1,0 +1,5 @@
+scene water-buoyancy
+description rigid body submersion with buoyancy, linear drag, angular drag, and enter stay exit events
+steps 240
+dt 0.0166667
+requires BuoyancySystem

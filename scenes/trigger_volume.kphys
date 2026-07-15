@@ -1,0 +1,6 @@
+scene trigger-volume
+description projectile crosses a trigger-only sensor volume and emits a hit event
+steps 120
+dt 0.0166667
+projectile_mode ballistic
+requires ProjectileSystem
