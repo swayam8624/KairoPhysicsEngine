@@ -67,6 +67,7 @@ target_sources(KairoPhysicsEngine
             ContactSolver.cppm
             PhysicsDebug.cppm
             PhysicsWorld.cppm
+            ProjectileSystem.cppm
             KairoPhysicsEngine.cppm
 )
 

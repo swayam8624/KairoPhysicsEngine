@@ -928,6 +928,55 @@ TEST_CASE("World debug shape extraction mirrors active collider geometry", "[Phy
     REQUIRE(shapes[3].PlaneDistance == Catch::Approx(-1.0f));
 }
 
+TEST_CASE("Projectile system handles hitscan ballistic owner ignore and trigger hits", "[PhysicsEngine][Projectile]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+
+    const BodyID ownerBody = world.CreateRigidBody(StaticBody(Vec3f::Zero()));
+    const BodyID wallBody = world.CreateRigidBody(StaticBody(Vec3f{ 3.0f, 0.0f, 0.0f }));
+    const BodyID triggerBody = world.CreateRigidBody(StaticBody(Vec3f{ 5.0f, 0.0f, 0.0f }));
+    const ColliderID owner = world.AddCollider(ownerBody, SphereCollider{ 0.5f });
+    const ColliderID wall = world.AddCollider(wallBody, AABBCollider{ Vec3f{ 0.25f, 1.0f, 1.0f } });
+    const ColliderID trigger = world.AddCollider(triggerBody, SphereCollider{ 0.5f });
+    world.SetColliderTrigger(trigger, true);
+
+    ProjectileSystem projectiles;
+    std::vector<ProjectileHitEvent> callbacks;
+    projectiles.SetHitCallback([&callbacks](const ProjectileHitEvent& event) { callbacks.push_back(event); });
+
+    ProjectileDesc hitscan;
+    hitscan.Mode = ProjectileMode::Hitscan;
+    hitscan.Position = Vec3f::Zero();
+    hitscan.Velocity = Vec3f{ 10.0f, 0.0f, 0.0f };
+    hitscan.MaxDistance = 10.0f;
+    hitscan.IgnoredOwnerCollider = owner;
+    const ProjectileID ray = projectiles.Spawn(hitscan);
+    projectiles.Step(world, 1.0f / 60.0f);
+    REQUIRE_FALSE(projectiles.IsActive(ray));
+    REQUIRE(projectiles.LastHits().size() == 1u);
+    REQUIRE(projectiles.LastHits().front().Sweep.Collider == wall);
+
+    ProjectileDesc ballistic = hitscan;
+    ballistic.Mode = ProjectileMode::Ballistic;
+    ballistic.Position = Vec3f{ 3.6f, 0.0f, 0.0f };
+    ballistic.Radius = 0.1f;
+    ballistic.Response = ProjectileImpactResponse::Pierce;
+    ballistic.Lifetime = 1.0f;
+    ballistic.MaxDistance = 10.0f;
+    const ProjectileID ball = projectiles.Spawn(ballistic);
+    projectiles.Step(world, 0.2f);
+    REQUIRE(projectiles.IsActive(ball));
+    REQUIRE(projectiles.LastHits().size() == 1u);
+    REQUIRE(projectiles.LastHits().front().Sweep.Collider == trigger);
+    REQUIRE(projectiles.LastHits().front().IsTrigger);
+    REQUIRE(callbacks.size() == 2u);
+
+    ProjectileDesc invalid = hitscan;
+    invalid.Radius = 0.0f;
+    REQUIRE_THROWS_AS(projectiles.Spawn(invalid), std::invalid_argument);
+}
+
 TEST_CASE("World swept spheres report deterministic continuous impacts", "[PhysicsEngine][World][Sweeps]")
 {
     PhysicsWorld world;
