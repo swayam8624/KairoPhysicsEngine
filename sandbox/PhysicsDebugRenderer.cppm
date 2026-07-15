@@ -16,6 +16,7 @@ export namespace kairo::foundation::physics::sandbox
     /// stable debug representation without depending on OpenGL, ImGui, or files.
     struct SandboxDebugSnapshot final
     {
+        std::vector<DebugShape> Shapes;
         std::vector<DebugAABB> AABBs;
         std::vector<DebugContact> Contacts;
         std::size_t BroadphasePairs = 0;
@@ -31,6 +32,7 @@ export namespace kairo::foundation::physics::sandbox
     {
         return
         {
+            world.DebugShapes(),
             world.DebugAABBs(),
             world.DebugContacts(),
             world.BroadphasePairs().size()

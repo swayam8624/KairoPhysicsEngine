@@ -721,6 +721,16 @@ export namespace kairo::foundation::physics
             return CollectDebugContacts(m_LastContacts);
         }
 
+        /// Input: none.
+        /// Output: immutable world-space descriptions for every active collider.
+        /// Task: publish renderer-ready debug geometry while preserving the
+        /// PhysicsWorld ownership boundary and avoiding renderer dependencies.
+        [[nodiscard]]
+        std::vector<DebugShape> DebugShapes() const
+        {
+            return CollectDebugShapes(m_Bodies, m_Colliders);
+        }
+
         [[nodiscard]]
         std::vector<ColliderID> QueryAABB(
             const AABBf& query,

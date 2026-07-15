@@ -898,6 +898,36 @@ TEST_CASE("World raycasts validate inputs and respect max distance", "[PhysicsEn
     REQUIRE_FALSE(world.Raycast(Vec3f{ -2.0f, 0.0f, 0.0f }, Vec3f::UnitX(), 1.0f).has_value());
 }
 
+TEST_CASE("World debug shape extraction mirrors active collider geometry", "[PhysicsEngine][Debug]")
+{
+    PhysicsWorld world;
+
+    const BodyID dynamic =
+        world.CreateRigidBody(DynamicSphereBody(Vec3f{ 1.0f, 2.0f, 3.0f }));
+    const BodyID staticBody =
+        world.CreateRigidBody(StaticBody());
+
+    [[maybe_unused]] const ColliderID sphere =
+        world.AddCollider(dynamic, SphereCollider{ 0.25f });
+    [[maybe_unused]] const ColliderID capsule =
+        world.AddCollider(dynamic, CapsuleCollider{ 0.5f, 0.75f });
+    [[maybe_unused]] const ColliderID box =
+        world.AddCollider(staticBody, BoxCollider{ Vec3f{ 1.0f, 2.0f, 3.0f } });
+    [[maybe_unused]] const ColliderID plane =
+        world.AddCollider(staticBody, PlaneCollider{ Vec3f::Up(), -1.0f });
+
+    const std::vector<DebugShape> shapes = world.DebugShapes();
+    REQUIRE(shapes.size() == 4u);
+    REQUIRE(shapes[0].Kind == DebugShapeKind::Sphere);
+    REQUIRE(shapes[0].Radius == Catch::Approx(0.25f));
+    REQUIRE(shapes[1].Kind == DebugShapeKind::Capsule);
+    REQUIRE(shapes[1].SegmentEnd.y - shapes[1].SegmentStart.y == Catch::Approx(1.5f));
+    REQUIRE(shapes[2].Kind == DebugShapeKind::Box);
+    REQUIRE(shapes[2].HalfExtents.z == Catch::Approx(3.0f));
+    REQUIRE(shapes[3].Kind == DebugShapeKind::Plane);
+    REQUIRE(shapes[3].PlaneDistance == Catch::Approx(-1.0f));
+}
+
 TEST_CASE("World swept spheres report deterministic continuous impacts", "[PhysicsEngine][World][Sweeps]")
 {
     PhysicsWorld world;
