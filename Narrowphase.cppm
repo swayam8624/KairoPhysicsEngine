@@ -16,6 +16,7 @@ import Kairo.Foundation.PhysicsMath;
 import Kairo.Foundation.PhysicsEngine.RigidBody;
 import Kairo.Foundation.PhysicsEngine.Collider;
 import Kairo.Foundation.PhysicsEngine.Broadphase;
+import Kairo.Foundation.PhysicsEngine.ConvexCollision;
 
 export namespace kairo::foundation::physics
 {
@@ -427,6 +428,45 @@ export namespace kairo::foundation::physics
 
         const Vec3f centerB =
             WorldColliderCenter(bodyB, colliderB);
+
+        if (std::holds_alternative<ConvexHullCollider>(colliderA.Shape))
+        {
+            if (const auto* planeB = std::get_if<PlaneCollider>(&colliderB.Shape))
+            {
+                const Vec3f hullPoint =
+                    ConvexShapeSupport(bodyA, colliderA, -planeB->Normal);
+                const float signedDistance =
+                    Dot(planeB->Normal, hullPoint) + planeB->Distance;
+                if (signedDistance >= 0.0f) return std::nullopt;
+                manifold.Points.push_back(MakeContactPoint(
+                    hullPoint, -planeB->Normal, -signedDistance));
+                return manifold;
+            }
+
+            const auto penetration =
+                CollideConvex(bodyA, colliderA, bodyB, colliderB);
+            if (!penetration) return std::nullopt;
+            manifold.Points.push_back(MakeContactPoint(
+                penetration->Position,
+                penetration->Normal,
+                penetration->Depth));
+            return manifold;
+        }
+
+        if (std::holds_alternative<ConvexHullCollider>(colliderB.Shape))
+        {
+            const auto swapped = CollidePair(bodyB, colliderB, bodyA, colliderA);
+            if (!swapped) return std::nullopt;
+            ContactManifold result = MakeContactManifold(
+                bodyA.ID, bodyB.ID, colliderA.ID, colliderB.ID,
+                colliderA.IsTrigger || colliderB.IsTrigger);
+            for (ContactPoint point : swapped->Points)
+            {
+                point.Normal = -point.Normal;
+                result.Points.push_back(point);
+            }
+            return result;
+        }
 
         if (const auto* capsuleA = std::get_if<CapsuleCollider>(&colliderA.Shape))
         {

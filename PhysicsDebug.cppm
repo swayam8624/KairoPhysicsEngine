@@ -1,5 +1,6 @@
 module;
 
+#include <array>
 #include <cstdint>
 #include <variant>
 #include <vector>
@@ -40,7 +41,8 @@ export namespace kairo::foundation::physics
         Capsule,
         Plane,
         AABB,
-        Box
+        Box,
+        ConvexHull
     };
 
     /// Input: an active collider and its owner transform.
@@ -62,6 +64,8 @@ export namespace kairo::foundation::physics
         Vec3f PlaneNormal = Vec3f::Up();
         float PlaneDistance = 0.0f;
         float Radius = 0.0f;
+        std::vector<Vec3f> Vertices;
+        std::vector<std::array<std::uint32_t, 3>> Faces;
         bool IsTrigger = false;
         bool Sleeping = false;
     };
@@ -178,6 +182,15 @@ export namespace kairo::foundation::physics
             {
                 shape.Kind = DebugShapeKind::Box;
                 shape.HalfExtents = box->HalfExtents;
+            }
+            else if (const auto* hull = std::get_if<ConvexHullCollider>(&collider.Shape))
+            {
+                shape.Kind = DebugShapeKind::ConvexHull;
+                shape.Faces = hull->Faces;
+                shape.Vertices.reserve(hull->Vertices.size());
+                for (const Vec3f& vertex : hull->Vertices)
+                    shape.Vertices.push_back(
+                        shape.Center + Rotate(shape.Rotation, vertex));
             }
 
             result.push_back(shape);

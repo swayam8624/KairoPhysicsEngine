@@ -70,6 +70,7 @@ target_sources(KairoPhysicsEngine
             RigidBody.cppm
             Collider.cppm
             Broadphase.cppm
+            ConvexCollision.cppm
             Narrowphase.cppm
             ContactSolver.cppm
             PhysicsDebug.cppm

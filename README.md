@@ -110,8 +110,10 @@ Current engine surface:
 Stable vector-index body/collider ids with inactive deletion-safe records
 Dynamic, static, and kinematic body behavior
 Per-body gravity scale, damping, max velocity clamps, sleeping, and wake hooks
-Sphere, plane, AABB, and oriented BoxCollider shapes
+Sphere, plane, AABB, oriented box, and validated convex-hull shapes
 CapsuleCollider with sphere/capsule/plane/AABB/oriented-box contacts
+GJK intersection and EPA penetration for convex hulls against finite convex shapes
+Exact convex-hull plane contacts, raycasts, sphere sweeps, bounds, and debug topology
 Collider local center and local rotation
 BelongsTo / CollidesWith collision filters
 Built-in CollisionLayer bits for player/projectile/trigger/sensor/cloth/fluid/particle categories
@@ -148,6 +150,7 @@ PhysicsMaterial      restitution/friction coefficients and mixing
 RigidBody            body records, active flags, sleep/wake helpers
 Collider             sphere/capsule/plane/AABB/box colliders, filters, world bounds
 Broadphase           persistent KairoSpatial DynamicAABBTree pair generation
+ConvexCollision      support maps, GJK/EPA, hull raycasts and point separation
 Narrowphase          exact V1 contact generation and box SAT
 ContactSolver        warm-started sequential impulses and position correction
 PhysicsDebug         renderer-agnostic debug contacts and AABBs
@@ -368,7 +371,7 @@ world.Step(dt);
 Still deferred:
 
 ```text
-Convex hulls, mesh colliders, GJK, EPA
+Static/dynamic triangle-mesh colliders and mesh acceleration
 Continuous dynamic rigid-body CCD beyond query/projectile sweeps
 Island solver and parallel island dispatch
 Joints and articulated constraints
@@ -381,8 +384,10 @@ Those belong to later engine phases, not `KairoPhysicsMath`.
 
 ## Physics Roadmap
 
-The rigid body engine now has the filtering, response, query, and callback
-surface needed before larger physics families are added. The next families
+The rigid body engine now has convex hull validation, GJK/EPA, filtering,
+response, query, and callback surfaces. Near-term rigid-body work should add
+triangle-mesh collision, persistent multi-point manifolds, general CCD, joints,
+and island solving before larger physics families are added. Those families
 should be separate modules that reuse the same world/query/event conventions:
 
 ```text

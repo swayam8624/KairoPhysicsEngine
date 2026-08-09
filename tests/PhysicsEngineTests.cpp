@@ -43,6 +43,165 @@ namespace
         desc.Mass = StaticMassProperties();
         return desc;
     }
+
+    ConvexHullCollider CubeHull(float halfExtent = 0.5f)
+    {
+        return {
+            {
+                { -halfExtent, -halfExtent, -halfExtent },
+                {  halfExtent, -halfExtent, -halfExtent },
+                {  halfExtent,  halfExtent, -halfExtent },
+                { -halfExtent,  halfExtent, -halfExtent },
+                { -halfExtent, -halfExtent,  halfExtent },
+                {  halfExtent, -halfExtent,  halfExtent },
+                {  halfExtent,  halfExtent,  halfExtent },
+                { -halfExtent,  halfExtent,  halfExtent }
+            },
+            {
+                { 0u, 1u, 2u }, { 0u, 2u, 3u },
+                { 4u, 6u, 5u }, { 4u, 7u, 6u },
+                { 0u, 3u, 7u }, { 0u, 7u, 4u },
+                { 1u, 5u, 6u }, { 1u, 6u, 2u },
+                { 0u, 4u, 5u }, { 0u, 5u, 1u },
+                { 3u, 2u, 6u }, { 3u, 6u, 7u }
+            }
+        };
+    }
+}
+
+TEST_CASE("Convex hull validation normalizes closed topology and rejects invalid input",
+    "[PhysicsEngine][Convex][Validation]")
+{
+    const Collider valid = MakeCollider(0, 0, CubeHull());
+    const auto& hull = std::get<ConvexHullCollider>(valid.Shape);
+    REQUIRE(hull.Vertices.size() == 8u);
+    REQUIRE(hull.Faces.size() == 12u);
+
+    ConvexHullCollider open = CubeHull();
+    open.Faces.pop_back();
+    REQUIRE_THROWS_AS(MakeCollider(0, 0, std::move(open)), std::invalid_argument);
+
+    ConvexHullCollider invalidIndex = CubeHull();
+    invalidIndex.Faces[0][0] = 99u;
+    REQUIRE_THROWS_AS(
+        MakeCollider(0, 0, std::move(invalidIndex)), std::invalid_argument);
+
+    ConvexHullCollider concave = CubeHull();
+    concave.Vertices[6] = Vec3f::Zero();
+    REQUIRE_THROWS_AS(
+        MakeCollider(0, 0, std::move(concave)), std::invalid_argument);
+
+    ConvexHullCollider duplicateVertex = CubeHull();
+    duplicateVertex.Vertices[7] = duplicateVertex.Vertices[6];
+    REQUIRE_THROWS_AS(
+        MakeCollider(0, 0, std::move(duplicateVertex)), std::invalid_argument);
+
+    ConvexHullCollider unusedVertex = CubeHull();
+    unusedVertex.Vertices.push_back(Vec3f::Zero());
+    REQUIRE_THROWS_AS(
+        MakeCollider(0, 0, std::move(unusedVertex)), std::invalid_argument);
+}
+
+TEST_CASE("GJK and EPA resolve convex penetration deterministically",
+    "[PhysicsEngine][Convex][GJK][EPA]")
+{
+    const RigidBody hullBody =
+        MakeRigidBody(0, StaticBody(Vec3f::Zero()));
+    const RigidBody sphereBody =
+        MakeRigidBody(1, DynamicSphereBody(Vec3f{ 0.75f, 0.0f, 0.0f }));
+    const Collider hull = MakeCollider(0, 0, CubeHull());
+    const Collider sphere = MakeCollider(1, 1, SphereCollider{ 0.5f });
+
+    const auto first = CollideConvex(hullBody, hull, sphereBody, sphere);
+    const auto second = CollideConvex(hullBody, hull, sphereBody, sphere);
+    REQUIRE(first.has_value());
+    REQUIRE(second.has_value());
+    CHECK(first->Normal.x == Catch::Approx(1.0f).margin(2.0e-3f));
+    CHECK(first->Depth == Catch::Approx(0.25f).margin(2.0e-3f));
+    CHECK(first->Depth == Catch::Approx(second->Depth));
+    CHECK(first->GJKIterations == second->GJKIterations);
+    CHECK(first->EPAIterations == second->EPAIterations);
+
+    const RigidBody separatedBody =
+        MakeRigidBody(1, DynamicSphereBody(Vec3f{ 2.0f, 0.0f, 0.0f }));
+    CHECK_FALSE(CollideConvex(
+        hullBody, hull, separatedBody, sphere).has_value());
+
+    RigidBodyDesc rotatedDesc = DynamicBoxBody(
+        Vec3f{ 0.7f, 0.1f, 0.05f });
+    rotatedDesc.State.Rotation = RotationAroundZ(0.35f);
+    const RigidBody rotatedBody = MakeRigidBody(2, rotatedDesc);
+    const Collider rotatedHull = MakeCollider(2, 2, CubeHull());
+    const auto hullHull =
+        CollideConvex(hullBody, hull, rotatedBody, rotatedHull);
+    const auto reverseHullHull =
+        CollideConvex(rotatedBody, rotatedHull, hullBody, hull);
+    REQUIRE(hullHull.has_value());
+    REQUIRE(reverseHullHull.has_value());
+    CHECK(hullHull->Depth > 0.0f);
+    CHECK(hullHull->Depth ==
+        Catch::Approx(reverseHullHull->Depth).margin(2.0e-3f));
+    CHECK(Dot(hullHull->Normal, reverseHullHull->Normal) < -0.99f);
+}
+
+TEST_CASE("Convex narrowphase supports planes pair symmetry and rotated hulls",
+    "[PhysicsEngine][Convex][Narrowphase]")
+{
+    RigidBodyDesc rotatedDesc = DynamicBoxBody(
+        Vec3f{ 0.0f, 0.35f, 0.0f });
+    rotatedDesc.State.Rotation = RotationAroundZ(0.3f);
+    const RigidBody hullBody = MakeRigidBody(0, rotatedDesc);
+    const RigidBody planeBody = MakeRigidBody(1, StaticBody());
+    const Collider hull = MakeCollider(0, 0, CubeHull());
+    const Collider plane =
+        MakeCollider(1, 1, PlaneCollider{ Vec3f::Up(), 0.0f });
+
+    const auto hullPlane = CollidePair(hullBody, hull, planeBody, plane);
+    const auto planeHull = CollidePair(planeBody, plane, hullBody, hull);
+    REQUIRE(hullPlane.has_value());
+    REQUIRE(planeHull.has_value());
+    CHECK(hullPlane->Points[0].PenetrationDepth > 0.0f);
+    CHECK(hullPlane->Points[0].Normal.y < 0.0f);
+    CHECK(planeHull->Points[0].Normal.y > 0.0f);
+}
+
+TEST_CASE("Convex colliders participate in world solving rays sweeps and debug",
+    "[PhysicsEngine][Convex][World]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    const BodyID hullBody = world.CreateRigidBody(StaticBody());
+    const BodyID sphereBody = world.CreateRigidBody(
+        DynamicSphereBody(Vec3f{ 0.75f, 0.0f, 0.0f }));
+    const ColliderID hullCollider =
+        world.AddCollider(hullBody, CubeHull());
+    [[maybe_unused]] const ColliderID sphereCollider =
+        world.AddCollider(sphereBody, SphereCollider{ 0.5f });
+
+    world.Step(1.0f / 60.0f);
+    REQUIRE(!world.Contacts().empty());
+
+    const auto ray = world.Raycast(
+        Vec3f{ -2.0f, 0.0f, 0.0f }, Vec3f::UnitX(), 5.0f);
+    REQUIRE(ray.has_value());
+    CHECK(ray->Collider == hullCollider);
+    CHECK(ray->Distance == Catch::Approx(1.5f).margin(1.0e-4f));
+    CHECK(ray->Normal.x == Catch::Approx(-1.0f).margin(1.0e-4f));
+
+    const auto sweep = world.SweepSphere(
+        Vec3f{ -2.0f, 0.0f, 0.0f }, Vec3f{ 1.0f, 0.0f, 0.0f }, 0.25f);
+    REQUIRE_FALSE(sweep.has_value());
+    const auto impact = world.SweepSphere(
+        Vec3f{ -2.0f, 0.0f, 0.0f }, Vec3f{ 4.0f, 0.0f, 0.0f }, 0.25f);
+    REQUIRE(impact.has_value());
+    CHECK(impact->Collider == hullCollider);
+    CHECK(impact->Distance == Catch::Approx(1.25f).margin(2.0e-3f));
+
+    const auto shapes = CollectDebugShapes(world.Bodies(), world.Colliders());
+    REQUIRE(shapes.size() == 2u);
+    CHECK(shapes[0].Kind == DebugShapeKind::ConvexHull);
+    CHECK(shapes[0].Vertices.size() == 8u);
+    CHECK(shapes[0].Faces.size() == 12u);
 }
 
 TEST_CASE("World creates bodies and colliders", "[PhysicsEngine][World]")

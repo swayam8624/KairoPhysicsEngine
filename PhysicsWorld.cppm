@@ -26,6 +26,7 @@ import Kairo.Foundation.PhysicsEngine.RigidBody;
 import Kairo.Foundation.PhysicsEngine.Collider;
 import Kairo.Foundation.PhysicsEngine.Broadphase;
 import Kairo.Foundation.PhysicsEngine.Narrowphase;
+import Kairo.Foundation.PhysicsEngine.ConvexCollision;
 import Kairo.Foundation.PhysicsEngine.ContactSolver;
 import Kairo.Foundation.PhysicsEngine.Debug;
 
@@ -1684,7 +1685,13 @@ export namespace kairo::foundation::physics
                         *plane,
                         maxDistance,
                         distance,
-                        normal);
+                    normal);
+            }
+            else if (const auto* hull = std::get_if<ConvexHullCollider>(&collider.Shape))
+            {
+                intersects = RaycastConvexHull(
+                    body, collider, *hull, origin, direction,
+                    maxDistance, distance, normal);
             }
 
             if (!intersects)
@@ -1738,6 +1745,10 @@ export namespace kairo::foundation::physics
                 normal = signedDistance >= 0.0f ? plane->Normal : -plane->Normal;
                 return std::abs(signedDistance);
             }
+
+            if (const auto* hull = std::get_if<ConvexHullCollider>(&collider.Shape))
+                return PointConvexHullSeparation(
+                    body, collider, *hull, point, fallbackNormal, normal);
 
             OrientedBoxFrame box;
             if (const auto* aabb = std::get_if<AABBCollider>(&collider.Shape))

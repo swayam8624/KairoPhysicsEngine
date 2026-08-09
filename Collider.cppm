@@ -1,8 +1,14 @@
 module;
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
+#include <map>
+#include <set>
+#include <stdexcept>
+#include <utility>
 #include <variant>
+#include <vector>
 
 export module Kairo.Foundation.PhysicsEngine.Collider;
 
@@ -90,8 +96,23 @@ export namespace kairo::foundation::physics
         Vec3f HalfExtents = Vec3f{ 0.5f, 0.5f, 0.5f };
     };
 
+    /// Closed, triangulated convex collision hull in collider-local space.
+    ///
+    /// Input: at least four non-coplanar vertices and outward/inward triangle
+    /// faces. `MakeCollider` normalizes face winding to outward and rejects
+    /// open, non-manifold, degenerate, or concave input. Output: a support-map
+    /// shape suitable for GJK/EPA and exact plane/ray tests. Task: represent
+    /// authored convex collision geometry without retaining render meshes or
+    /// importing a third-party collision library.
+    struct ConvexHullCollider final
+    {
+        std::vector<Vec3f> Vertices;
+        std::vector<std::array<std::uint32_t, 3>> Faces;
+    };
+
     using ColliderShape =
-        std::variant<SphereCollider, CapsuleCollider, PlaneCollider, AABBCollider, BoxCollider>;
+        std::variant<SphereCollider, CapsuleCollider, PlaneCollider, AABBCollider,
+            BoxCollider, ConvexHullCollider>;
 
     struct Collider final
     {
@@ -315,6 +336,17 @@ export namespace kairo::foundation::physics
             return AABBf::FromCenterExtent(frame.Center, extents);
         }
 
+        if (const auto* hull = std::get_if<ConvexHullCollider>(&collider.Shape))
+        {
+            AABBf bounds = AABBf::Empty();
+            const Quaternionf rotation = WorldColliderRotation(body, collider);
+            for (const Vec3f& vertex : hull->Vertices)
+            {
+                bounds.ExpandToInclude(center + Rotate(rotation, vertex));
+            }
+            return bounds;
+        }
+
         return AABBf::Empty();
     }
 
@@ -353,6 +385,87 @@ export namespace kairo::foundation::physics
         else if (const auto* box = std::get_if<BoxCollider>(&shape))
         {
             RequirePositiveComponents(box->HalfExtents, "BoxCollider.HalfExtents");
+        }
+        else if (auto* hull = std::get_if<ConvexHullCollider>(&shape))
+        {
+            if (hull->Vertices.size() < 4u || hull->Faces.size() < 4u)
+                throw std::invalid_argument(
+                    "ConvexHullCollider requires at least four vertices and faces.");
+
+            Vec3f centroid = Vec3f::Zero();
+            float scale = 0.0f;
+            for (const Vec3f& vertex : hull->Vertices)
+            {
+                RequireFinite(vertex, "ConvexHullCollider.Vertex");
+                centroid += vertex;
+                scale = std::max(scale, vertex.Length());
+            }
+            centroid /= static_cast<float>(hull->Vertices.size());
+            const float tolerance = std::max(1.0f, scale) * 1.0e-5f;
+            for (std::size_t first = 0u; first < hull->Vertices.size(); ++first)
+                for (std::size_t second = first + 1u;
+                    second < hull->Vertices.size(); ++second)
+                    if ((hull->Vertices[first] - hull->Vertices[second])
+                        .LengthSquared() <= tolerance * tolerance)
+                        throw std::invalid_argument(
+                            "ConvexHullCollider contains duplicate vertices.");
+            std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t>
+                edgeUse;
+            std::vector<std::uint32_t> vertexUse(hull->Vertices.size(), 0u);
+            std::set<std::array<std::uint32_t, 3>> uniqueFaces;
+
+            for (auto& face : hull->Faces)
+            {
+                if (face[0] >= hull->Vertices.size() ||
+                    face[1] >= hull->Vertices.size() ||
+                    face[2] >= hull->Vertices.size() ||
+                    face[0] == face[1] || face[1] == face[2] ||
+                    face[2] == face[0])
+                    throw std::invalid_argument(
+                        "ConvexHullCollider face contains invalid vertex indices.");
+
+                auto faceKey = face;
+                std::sort(faceKey.begin(), faceKey.end());
+                if (!uniqueFaces.insert(faceKey).second)
+                    throw std::invalid_argument(
+                        "ConvexHullCollider contains duplicate faces.");
+                ++vertexUse[face[0]];
+                ++vertexUse[face[1]];
+                ++vertexUse[face[2]];
+
+                const Vec3f& a = hull->Vertices[face[0]];
+                const Vec3f& b = hull->Vertices[face[1]];
+                const Vec3f& c = hull->Vertices[face[2]];
+                Vec3f normal = Cross(b - a, c - a);
+                if (normal.LengthSquared() <= tolerance * tolerance)
+                    throw std::invalid_argument(
+                        "ConvexHullCollider contains a degenerate face.");
+                if (Dot(normal, centroid - a) > 0.0f)
+                {
+                    std::swap(face[1], face[2]);
+                    normal = -normal;
+                }
+                normal = normal.Normalized();
+                for (const Vec3f& vertex : hull->Vertices)
+                    if (Dot(normal, vertex - a) > tolerance)
+                        throw std::invalid_argument(
+                            "ConvexHullCollider vertices do not form a convex hull.");
+
+                for (std::size_t edge = 0u; edge < 3u; ++edge)
+                {
+                    const auto first = face[edge];
+                    const auto second = face[(edge + 1u) % 3u];
+                    ++edgeUse[std::minmax(first, second)];
+                }
+            }
+            for (const auto& [edge, count] : edgeUse)
+                if (count != 2u)
+                    throw std::invalid_argument(
+                        "ConvexHullCollider must be a closed two-manifold mesh.");
+            if (std::find(vertexUse.begin(), vertexUse.end(), 0u) !=
+                vertexUse.end())
+                throw std::invalid_argument(
+                    "ConvexHullCollider contains an unused vertex.");
         }
         else if (auto* plane = std::get_if<PlaneCollider>(&shape))
         {
