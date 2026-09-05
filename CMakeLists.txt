@@ -10,9 +10,10 @@ option(KAIRO_PHYSICS_ENGINE_BUILD_SANDBOX "Build terminal KairoPhysicsEngine san
 option(KAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX "Build GLFW KairoPhysicsEngine debug sandbox when GLFW is available" ${PROJECT_IS_TOP_LEVEL})
 
 # Immutable standalone fallback revisions. The superproject supplies local
-# targets; these pins make a direct clone deterministic when it does not.
-set(KAIRO_PHYSICS_ENGINE_PHYSICS_MATH_REVISION dc3bc87db51a2cad6c8904ff488bc55fc17bbedb)
-set(KAIRO_PHYSICS_ENGINE_SPATIAL_REVISION 8114c1fba2875ebc28180261b9a4cbf8763d6afd)
+# targets; these exact pins are clean-clone validated by PhysicsEngine CI so a
+# direct consumer receives the same tested dependency graph on every configure.
+set(KAIRO_PHYSICS_ENGINE_PHYSICS_MATH_REVISION da0573edfbc38fcf518b2db8a2aba5c7e8b3b1b8)
+set(KAIRO_PHYSICS_ENGINE_SPATIAL_REVISION 40d34b83d7cdcfaf19407d85394b2b86c41e4d18)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     add_compile_options(-Wall -Wextra -Wno-unused-parameter)

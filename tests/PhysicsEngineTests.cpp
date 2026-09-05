@@ -1,5 +1,6 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <variant>
 
 import Kairo.Foundation.PhysicsEngine;
 import Kairo.Foundation.PhysicsMath;
@@ -44,6 +45,20 @@ namespace
         return desc;
     }
 
+    TriangleMeshCollider FloorMesh(float halfExtent = 2.0f)
+    {
+        TriangleMeshCollider mesh;
+        mesh.Vertices = {
+  { -halfExtent, 0.0f, -halfExtent },
+  {  halfExtent, 0.0f, -halfExtent },
+  {  halfExtent, 0.0f,  halfExtent },
+  { -halfExtent, 0.0f,  halfExtent }
+        };
+        // Counter-clockwise as viewed from +Y.
+        mesh.Triangles = { { 0u, 2u, 1u }, { 0u, 3u, 2u } };
+        return mesh;
+    }
+
     ConvexHullCollider CubeHull(float halfExtent = 0.5f)
     {
         return {
@@ -67,6 +82,81 @@ namespace
             }
         };
     }
+}
+
+
+TEST_CASE("Triangle mesh validation builds a SAH BVH and rejects invalid data",
+    "[PhysicsEngine][TriangleMesh][Validation]")
+{
+    const Collider valid = MakeCollider(0, 0, FloorMesh());
+    const auto& mesh = std::get<TriangleMeshCollider>(valid.Shape);
+    REQUIRE(mesh.Triangles.size() == 2u);
+    REQUIRE_FALSE(mesh.Acceleration.Empty());
+    CHECK(mesh.Acceleration.IsValid());
+    CHECK(mesh.Acceleration.Stats.PrimitiveCount == 2u);
+
+    TriangleMeshCollider invalid = FloorMesh();
+    invalid.Triangles[0][2] = 99u;
+    REQUIRE_THROWS_AS(MakeCollider(0, 0, std::move(invalid)), std::invalid_argument);
+
+    TriangleMeshCollider degenerate = FloorMesh();
+    degenerate.Triangles[0] = { 0u, 0u, 1u };
+    REQUIRE_THROWS_AS(
+        MakeCollider(0, 0, std::move(degenerate)), std::invalid_argument);
+
+    PhysicsWorld world;
+    const BodyID dynamicBody = world.CreateRigidBody(DynamicBoxBody(Vec3f::Zero()));
+    REQUIRE_THROWS_AS(
+        world.AddCollider(dynamicBody, FloorMesh()), std::invalid_argument);
+}
+
+TEST_CASE("Static triangle meshes collide query raycast sweep and debug consistently",
+    "[PhysicsEngine][TriangleMesh][World]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    const BodyID floorBody = world.CreateRigidBody(StaticBody());
+    const ColliderID floor = world.AddCollider(floorBody, FloorMesh());
+    const BodyID sphereBody = world.CreateRigidBody(
+        DynamicSphereBody(Vec3f{ 0.0f, 0.40f, 0.0f }));
+    const ColliderID sphere = world.AddCollider(sphereBody, SphereCollider{ 0.5f });
+
+    const auto direct = CollidePair(
+        world.Bodies().at(floorBody), world.Colliders().at(floor),
+        world.Bodies().at(sphereBody), world.Colliders().at(sphere));
+    REQUIRE(direct.has_value());
+    REQUIRE_FALSE(direct->Points.empty());
+    CHECK(direct->Points[0].Normal.y > 0.9f);
+    CHECK(direct->Points[0].PenetrationDepth > 0.05f);
+
+    const auto overlap = world.QueryAABB(AABBf::FromCenterExtent(
+        Vec3f::Zero(), Vec3f{ 0.5f, 0.1f, 0.5f }));
+    CHECK(std::find(overlap.begin(), overlap.end(), floor) != overlap.end());
+
+    const auto ray = world.Raycast(
+        Vec3f{ 0.0f, 2.0f, 0.0f }, -Vec3f::UnitY(), 10.0f,
+        0xFFFF'FFFFu, sphere);
+    REQUIRE(ray.has_value());
+    CHECK(ray->Collider == floor);
+    CHECK(ray->Distance == Catch::Approx(2.0f).margin(1.0e-4f));
+    CHECK(ray->Point.y == Catch::Approx(0.0f).margin(1.0e-4f));
+    CHECK(ray->Normal.y > 0.9f);
+
+    const auto sweep = world.SweepSphere(
+        Vec3f{ 0.0f, 2.0f, 0.0f }, Vec3f{ 0.0f, -3.0f, 0.0f }, 0.25f,
+        0xFFFF'FFFFu, sphere);
+    REQUIRE(sweep.has_value());
+    CHECK(sweep->Collider == floor);
+    CHECK(sweep->TimeOfImpact == Catch::Approx(1.75f / 3.0f).margin(2.0e-3f));
+    CHECK(sweep->Normal.y > 0.9f);
+
+    const auto debug = world.DebugShapes();
+    const auto found = std::find_if(debug.begin(), debug.end(),
+        [&](const DebugShape& shape) { return shape.Collider == floor; });
+    REQUIRE(found != debug.end());
+    CHECK(found->Kind == DebugShapeKind::TriangleMesh);
+    CHECK(found->Vertices.size() == 4u);
+    CHECK(found->Faces.size() == 2u);
 }
 
 TEST_CASE("Convex hull validation normalizes closed topology and rejects invalid input",

@@ -42,7 +42,8 @@ export namespace kairo::foundation::physics
         Plane,
         AABB,
         Box,
-        ConvexHull
+        ConvexHull,
+        TriangleMesh
     };
 
     /// Input: an active collider and its owner transform.
@@ -189,6 +190,15 @@ export namespace kairo::foundation::physics
                 shape.Faces = hull->Faces;
                 shape.Vertices.reserve(hull->Vertices.size());
                 for (const Vec3f& vertex : hull->Vertices)
+                    shape.Vertices.push_back(
+                        shape.Center + Rotate(shape.Rotation, vertex));
+            }
+            else if (const auto* mesh = std::get_if<TriangleMeshCollider>(&collider.Shape))
+            {
+                shape.Kind = DebugShapeKind::TriangleMesh;
+                shape.Faces = mesh->Triangles;
+                shape.Vertices.reserve(mesh->Vertices.size());
+                for (const Vec3f& vertex : mesh->Vertices)
                     shape.Vertices.push_back(
                         shape.Center + Rotate(shape.Rotation, vertex));
             }

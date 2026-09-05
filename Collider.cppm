@@ -17,6 +17,9 @@ import Kairo.Foundation.Math.Quaternion;
 import Kairo.Foundation.Geometry.Sphere;
 import Kairo.Foundation.Geometry.Plane;
 import Kairo.Foundation.Geometry.AABB;
+import Kairo.Foundation.Spatial.Types;
+import Kairo.Foundation.Spatial.BVH;
+import Kairo.Foundation.Spatial.BVHBuilder;
 import Kairo.Foundation.PhysicsMath;
 import Kairo.Foundation.PhysicsEngine.Material;
 import Kairo.Foundation.PhysicsEngine.RigidBody;
@@ -110,9 +113,26 @@ export namespace kairo::foundation::physics
         std::vector<std::array<std::uint32_t, 3>> Faces;
     };
 
+    /// Concave triangle collision surface accelerated in collider-local space.
+    ///
+    /// Vertices and triangle indices are immutable authored geometry after the
+    /// collider is created. `Acceleration` stores one KairoSpatial BVH primitive
+    /// per triangle; because that tree is local-space, rigid world transforms do
+    /// not require rebuilding it. `SurfaceThickness` turns the mathematically
+    /// zero-volume triangles into a thin collision shell for robust GJK/EPA
+    /// contact generation while ray and sweep tests remain triangle-exact.
+    struct TriangleMeshCollider final
+    {
+        std::vector<Vec3f> Vertices;
+        std::vector<std::array<std::uint32_t, 3>> Triangles;
+        kairo::foundation::spatial::BVH Acceleration;
+        float SurfaceThickness = 1.0e-3f;
+        bool DoubleSided = true;
+    };
+
     using ColliderShape =
         std::variant<SphereCollider, CapsuleCollider, PlaneCollider, AABBCollider,
-            BoxCollider, ConvexHullCollider>;
+            BoxCollider, ConvexHullCollider, TriangleMeshCollider>;
 
     struct Collider final
     {
@@ -347,6 +367,25 @@ export namespace kairo::foundation::physics
             return bounds;
         }
 
+        if (const auto* mesh = std::get_if<TriangleMeshCollider>(&collider.Shape))
+        {
+            if (mesh->Acceleration.Empty()) return AABBf::Empty();
+            const AABBf local = mesh->Acceleration.Root().Bounds;
+            const Quaternionf rotation = WorldColliderRotation(body, collider);
+            AABBf bounds = AABBf::Empty();
+            for (std::uint32_t mask = 0u; mask < 8u; ++mask)
+            {
+                const Vec3f corner
+                {
+                    (mask & 1u) != 0u ? local.Max.x : local.Min.x,
+                    (mask & 2u) != 0u ? local.Max.y : local.Min.y,
+                    (mask & 4u) != 0u ? local.Max.z : local.Min.z
+                };
+                bounds.ExpandToInclude(center + Rotate(rotation, corner));
+            }
+            return bounds;
+        }
+
         return AABBf::Empty();
     }
 
@@ -412,7 +451,16 @@ export namespace kairo::foundation::physics
             std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t>
                 edgeUse;
             std::vector<std::uint32_t> vertexUse(hull->Vertices.size(), 0u);
-            std::set<std::array<std::uint32_t, 3>> uniqueFaces;
+            const auto faceIndexLess =
+      [](const std::array<std::uint32_t, 3>& lhs,
+         const std::array<std::uint32_t, 3>& rhs) noexcept
+      {
+          if (lhs[0] != rhs[0]) return lhs[0] < rhs[0];
+          if (lhs[1] != rhs[1]) return lhs[1] < rhs[1];
+          return lhs[2] < rhs[2];
+      };
+  std::set<std::array<std::uint32_t, 3>, decltype(faceIndexLess)>
+      uniqueFaces(faceIndexLess);
 
             for (auto& face : hull->Faces)
             {
@@ -467,6 +515,58 @@ export namespace kairo::foundation::physics
                 throw std::invalid_argument(
                     "ConvexHullCollider contains an unused vertex.");
         }
+        else if (auto* mesh = std::get_if<TriangleMeshCollider>(&shape))
+        {
+            using namespace kairo::foundation::spatial;
+            if (mesh->Vertices.size() < 3u || mesh->Triangles.empty())
+                throw std::invalid_argument(
+                    "TriangleMeshCollider requires vertices and at least one triangle.");
+            RequirePositive(mesh->SurfaceThickness,
+                "TriangleMeshCollider.SurfaceThickness");
+
+            for (const Vec3f& vertex : mesh->Vertices)
+                RequireFinite(vertex, "TriangleMeshCollider.Vertex");
+
+            std::vector<SpatialPrimitive> primitives;
+            primitives.reserve(mesh->Triangles.size());
+            for (std::size_t index = 0u; index < mesh->Triangles.size(); ++index)
+            {
+                const auto& triangle = mesh->Triangles[index];
+                if (triangle[0] >= mesh->Vertices.size() ||
+                    triangle[1] >= mesh->Vertices.size() ||
+                    triangle[2] >= mesh->Vertices.size() ||
+                    triangle[0] == triangle[1] || triangle[1] == triangle[2] ||
+                    triangle[2] == triangle[0])
+                    throw std::invalid_argument(
+                        "TriangleMeshCollider triangle contains invalid vertex indices.");
+
+                const Vec3f& a = mesh->Vertices[triangle[0]];
+                const Vec3f& b = mesh->Vertices[triangle[1]];
+                const Vec3f& c = mesh->Vertices[triangle[2]];
+                if (Cross(b - a, c - a).LengthSquared() <= 1.0e-12f)
+                    throw std::invalid_argument(
+                        "TriangleMeshCollider contains a degenerate triangle.");
+
+                AABBf bounds = AABBf::Empty();
+                bounds.ExpandToInclude(a);
+                bounds.ExpandToInclude(b);
+                bounds.ExpandToInclude(c);
+                const Vec3f margin{ mesh->SurfaceThickness, mesh->SurfaceThickness,
+                    mesh->SurfaceThickness };
+                bounds = AABBf::FromMinMax(bounds.Min - margin, bounds.Max + margin);
+                primitives.push_back({
+                    static_cast<SpatialID>(index), bounds, CollisionLayer::All });
+            }
+
+            BVHBuildSettings settings;
+            settings.MaxLeafSize = 4u;
+            settings.MaxDepth = 64u;
+            settings.UseSAH = true;
+            mesh->Acceleration = BuildBVH(primitives, settings);
+            if (!mesh->Acceleration.IsValid())
+                throw std::runtime_error(
+                    "TriangleMeshCollider failed to build a valid acceleration BVH.");
+        }
         else if (auto* plane = std::get_if<PlaneCollider>(&shape))
         {
             RequireFinite(plane->Normal, "PlaneCollider.Normal");
@@ -474,6 +574,7 @@ export namespace kairo::foundation::physics
             plane->Normal = SafeNormalize(plane->Normal, Vec3f::Up());
         }
 
-        return { id, true, body, localCenter, localRotation.Normalized(), shape, material, 1u, 0xFFFF'FFFFu, false, 1u };
+        return { id, true, body, localCenter, localRotation.Normalized(),
+            std::move(shape), material, 1u, 0xFFFF'FFFFu, false, 1u };
     }
 }
