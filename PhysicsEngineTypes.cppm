@@ -19,6 +19,8 @@ export namespace kairo::foundation::physics
         float Baumgarte = 0.2f;
         float Slop = 0.01f;
         float MaxPositionCorrection = 0.25f;
+        bool EnableParallelIslands = false;
+        std::uint32_t ParallelIslandMinCount = 4;
         bool EnableSleeping = true;
         float SleepLinearSpeed = 0.05f;
         float SleepAngularSpeed = 0.05f;
@@ -50,6 +52,11 @@ export namespace kairo::foundation::physics
         if (settings.PositionIterations == 0)
         {
             throw std::invalid_argument("PositionIterations must be greater than zero.");
+        }
+
+        if (settings.ParallelIslandMinCount == 0)
+        {
+            throw std::invalid_argument("ParallelIslandMinCount must be greater than zero.");
         }
     }
 }

@@ -29,6 +29,8 @@ import Kairo.Foundation.PhysicsEngine.Broadphase;
 import Kairo.Foundation.PhysicsEngine.Narrowphase;
 import Kairo.Foundation.PhysicsEngine.ConvexCollision;
 import Kairo.Foundation.PhysicsEngine.ContactSolver;
+import Kairo.Foundation.PhysicsEngine.Joint;
+import Kairo.Foundation.PhysicsEngine.SolverIsland;
 import Kairo.Foundation.PhysicsEngine.Debug;
 
 export namespace kairo::foundation::physics
@@ -139,6 +141,16 @@ export namespace kairo::foundation::physics
             return collider < m_Colliders.size() &&
                 IsActiveCollider(m_Colliders[collider]) &&
                 IsValidBody(m_Colliders[collider].Body);
+        }
+
+        [[nodiscard]]
+        bool IsValidJoint(
+            JointID joint) const noexcept
+        {
+            return joint < m_Joints.size() &&
+                IsActiveJoint(m_Joints[joint]) &&
+                IsValidBody(m_Joints[joint].BodyA) &&
+                IsValidBody(m_Joints[joint].BodyB);
         }
 
         [[nodiscard]]
@@ -442,6 +454,119 @@ export namespace kairo::foundation::physics
             m_Colliders.at(collider).IsTrigger = isTrigger;
         }
 
+        [[nodiscard]]
+        JointID CreateDistanceJoint(
+            BodyID bodyA,
+            BodyID bodyB,
+            const Vec3f& worldAnchorA,
+            const Vec3f& worldAnchorB,
+            float restLength = -1.0f,
+            bool collideConnected = false)
+        {
+            RequireJointBodies(bodyA, bodyB, "CreateDistanceJoint");
+            RequireFinite(worldAnchorA, "CreateDistanceJoint.worldAnchorA");
+            RequireFinite(worldAnchorB, "CreateDistanceJoint.worldAnchorB");
+            const float resolvedLength = restLength < 0.0f
+                ? (worldAnchorB - worldAnchorA).Length()
+                : restLength;
+            RequireNonNegative(resolvedLength, "CreateDistanceJoint.restLength");
+            const JointID id = static_cast<JointID>(m_Joints.size());
+            m_Joints.push_back(MakeDistanceJoint(
+                id, bodyA, bodyB,
+                BodyLocalPoint(m_Bodies.at(bodyA), worldAnchorA),
+                BodyLocalPoint(m_Bodies.at(bodyB), worldAnchorB),
+                resolvedLength,
+                collideConnected));
+            WakeJointPair(bodyA, bodyB);
+            return id;
+        }
+
+        [[nodiscard]]
+        JointID CreateBallSocketJoint(
+            BodyID bodyA,
+            BodyID bodyB,
+            const Vec3f& worldAnchor,
+            bool collideConnected = false)
+        {
+            RequireJointBodies(bodyA, bodyB, "CreateBallSocketJoint");
+            RequireFinite(worldAnchor, "CreateBallSocketJoint.worldAnchor");
+            const JointID id = static_cast<JointID>(m_Joints.size());
+            m_Joints.push_back(MakeBallSocketJoint(
+                id, bodyA, bodyB,
+                BodyLocalPoint(m_Bodies.at(bodyA), worldAnchor),
+                BodyLocalPoint(m_Bodies.at(bodyB), worldAnchor),
+                collideConnected));
+            WakeJointPair(bodyA, bodyB);
+            return id;
+        }
+
+        [[nodiscard]]
+        JointID CreateFixedJoint(
+            BodyID bodyA,
+            BodyID bodyB,
+            const Vec3f& worldAnchor,
+            bool collideConnected = false)
+        {
+            RequireJointBodies(bodyA, bodyB, "CreateFixedJoint");
+            RequireFinite(worldAnchor, "CreateFixedJoint.worldAnchor");
+            const JointID id = static_cast<JointID>(m_Joints.size());
+            const Quaternionf reference =
+                (Inverse(m_Bodies.at(bodyA).State.Rotation) *
+                    m_Bodies.at(bodyB).State.Rotation).Normalized();
+            m_Joints.push_back(MakeFixedJoint(
+                id, bodyA, bodyB,
+                BodyLocalPoint(m_Bodies.at(bodyA), worldAnchor),
+                BodyLocalPoint(m_Bodies.at(bodyB), worldAnchor),
+                reference,
+                collideConnected));
+            WakeJointPair(bodyA, bodyB);
+            return id;
+        }
+
+        [[nodiscard]]
+        JointID CreateHingeJoint(
+            BodyID bodyA,
+            BodyID bodyB,
+            const Vec3f& worldAnchor,
+            const Vec3f& worldAxis,
+            bool collideConnected = false)
+        {
+            RequireJointBodies(bodyA, bodyB, "CreateHingeJoint");
+            RequireFinite(worldAnchor, "CreateHingeJoint.worldAnchor");
+            RequireFinite(worldAxis, "CreateHingeJoint.worldAxis");
+            if (worldAxis.LengthSquared() <= 1.0e-10f)
+            {
+                throw std::invalid_argument("CreateHingeJoint.worldAxis must be non-zero.");
+            }
+            const Vec3f axis = worldAxis.Normalized();
+            const JointID id = static_cast<JointID>(m_Joints.size());
+            m_Joints.push_back(MakeHingeJoint(
+                id, bodyA, bodyB,
+                BodyLocalPoint(m_Bodies.at(bodyA), worldAnchor),
+                BodyLocalPoint(m_Bodies.at(bodyB), worldAnchor),
+                Rotate(m_Bodies.at(bodyA).State.Rotation.Conjugate(), axis),
+                Rotate(m_Bodies.at(bodyB).State.Rotation.Conjugate(), axis),
+                collideConnected));
+            WakeJointPair(bodyA, bodyB);
+            return id;
+        }
+
+        void DestroyJoint(JointID joint)
+        {
+            if (joint >= m_Joints.size())
+            {
+                throw std::out_of_range("DestroyJoint failed: joint id does not exist.");
+            }
+            Joint& record = m_Joints.at(joint);
+            if (!record.Active)
+            {
+                return;
+            }
+            record.Active = false;
+            record.BodyA = InvalidBodyID;
+            record.BodyB = InvalidBodyID;
+        }
+
         /// Input: active body id.
         /// Output: none.
         /// Task: deactivate a body and every collider attached to it without
@@ -468,6 +593,14 @@ export namespace kairo::foundation::physics
                 if (collider.Active && collider.Body == body)
                 {
                     RemoveCollider(collider.ID);
+                }
+            }
+
+            for (Joint& joint : m_Joints)
+            {
+                if (joint.Active && (joint.BodyA == body || joint.BodyB == body))
+                {
+                    DestroyJoint(joint.ID);
                 }
             }
 
@@ -609,6 +742,8 @@ export namespace kairo::foundation::physics
             UpdateContactEvents();
             DispatchContactEvents();
             WakeContactBodies();
+            WakeJointBodies();
+            m_LastIslands = BuildSolverIslands(m_Bodies, m_LastContacts, m_Joints);
 
             const auto narrowphaseEnd =
                 std::chrono::steady_clock::now();
@@ -619,18 +754,22 @@ export namespace kairo::foundation::physics
             RestoreContactCache();
             WarmStartContacts(m_Bodies, m_Colliders, m_LastContacts);
 
-            SolveContacts(
+            SolveSolverIslands(
                 m_Bodies,
                 m_Colliders,
                 m_LastContacts,
+                m_Joints,
+                m_LastIslands,
                 Settings,
                 dt);
 
             StoreContactCache();
 
-            CorrectPositions(
+            CorrectSolverIslandPositions(
                 m_Bodies,
                 m_LastContacts,
+                m_Joints,
+                m_LastIslands,
                 Settings);
 
             const auto solverEnd =
@@ -720,6 +859,18 @@ export namespace kairo::foundation::physics
         const std::vector<ContactManifold>& Contacts() const noexcept
         {
             return m_LastContacts;
+        }
+
+        [[nodiscard]]
+        const std::vector<Joint>& Joints() const noexcept
+        {
+            return m_Joints;
+        }
+
+        [[nodiscard]]
+        const std::vector<SolverIsland>& SolverIslands() const noexcept
+        {
+            return m_LastIslands;
         }
 
         [[nodiscard]]
@@ -991,6 +1142,8 @@ export namespace kairo::foundation::physics
     private:
         std::vector<RigidBody> m_Bodies;
         std::vector<Collider> m_Colliders;
+        std::vector<Joint> m_Joints;
+        std::vector<SolverIsland> m_LastIslands;
         mutable BroadphaseWorld m_Broadphase;
         std::vector<BroadphasePair> m_LastPairs;
         std::vector<ContactManifold> m_LastContacts;
@@ -1028,6 +1181,94 @@ export namespace kairo::foundation::physics
         };
 
         std::vector<ContactCacheEntry> m_ContactCache;
+
+        void RequireJointBodies(
+            BodyID bodyA,
+            BodyID bodyB,
+            const char* operation) const
+        {
+            if (!IsValidBody(bodyA) || !IsValidBody(bodyB))
+            {
+                throw std::out_of_range(
+                    std::string(operation) +
+                    " failed: body id does not exist or is inactive.");
+            }
+            if (bodyA == bodyB)
+            {
+                throw std::invalid_argument(
+                    std::string(operation) +
+                    " failed: a joint must connect two different bodies.");
+            }
+        }
+
+        [[nodiscard]]
+        static Vec3f BodyLocalPoint(
+            const RigidBody& body,
+            const Vec3f& worldPoint)
+        {
+            return Rotate(
+                body.State.Rotation.Conjugate(),
+                worldPoint - body.State.Position);
+        }
+
+        void WakeJointPair(BodyID bodyA, BodyID bodyB)
+        {
+            if (bodyA < m_Bodies.size() && IsDynamicBodyType(m_Bodies.at(bodyA)))
+            {
+                WakeRigidBody(m_Bodies.at(bodyA));
+            }
+            if (bodyB < m_Bodies.size() && IsDynamicBodyType(m_Bodies.at(bodyB)))
+            {
+                WakeRigidBody(m_Bodies.at(bodyB));
+            }
+        }
+
+        void WakeJointBodies()
+        {
+            for (const Joint& joint : m_Joints)
+            {
+                if (!IsActiveJoint(joint) ||
+                    joint.BodyA >= m_Bodies.size() || joint.BodyB >= m_Bodies.size())
+                {
+                    continue;
+                }
+                RigidBody& bodyA = m_Bodies.at(joint.BodyA);
+                RigidBody& bodyB = m_Bodies.at(joint.BodyB);
+
+                const bool wakeA =
+                    IsDynamicBodyType(bodyA) && bodyA.Sleeping &&
+                    ((IsDynamicBodyType(bodyB) && !bodyB.Sleeping) ||
+                     (IsKinematic(bodyB) &&
+                      (bodyB.State.LinearVelocity.LengthSquared() > 1.0e-12f ||
+                       bodyB.State.AngularVelocity.LengthSquared() > 1.0e-12f)));
+                const bool wakeB =
+                    IsDynamicBodyType(bodyB) && bodyB.Sleeping &&
+                    ((IsDynamicBodyType(bodyA) && !bodyA.Sleeping) ||
+                     (IsKinematic(bodyA) &&
+                      (bodyA.State.LinearVelocity.LengthSquared() > 1.0e-12f ||
+                       bodyA.State.AngularVelocity.LengthSquared() > 1.0e-12f)));
+                if (wakeA) WakeRigidBody(bodyA);
+                if (wakeB) WakeRigidBody(bodyB);
+            }
+        }
+
+        [[nodiscard]]
+        bool JointDisablesCollision(BodyID bodyA, BodyID bodyB) const noexcept
+        {
+            for (const Joint& joint : m_Joints)
+            {
+                if (!IsActiveJoint(joint) || joint.CollideConnected)
+                {
+                    continue;
+                }
+                if ((joint.BodyA == bodyA && joint.BodyB == bodyB) ||
+                    (joint.BodyA == bodyB && joint.BodyB == bodyA))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
 
         /// Input: none; this is a logically-const maintenance operation.
         /// Output: the persistent dynamic tree reflects current body transforms.
@@ -1235,7 +1476,8 @@ export namespace kairo::foundation::physics
             for (ContactManifold manifold : m_LastContacts)
             {
                 if (manifold.ColliderA >= m_Colliders.size() ||
-                    manifold.ColliderB >= m_Colliders.size())
+                    manifold.ColliderB >= m_Colliders.size() ||
+                    JointDisablesCollision(manifold.BodyA, manifold.BodyB))
                 {
                     continue;
                 }

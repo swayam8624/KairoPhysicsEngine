@@ -59,6 +59,8 @@ if(NOT TARGET KairoSpatial)
     endif()
 endif()
 
+find_package(Threads REQUIRED)
+
 add_library(KairoPhysicsEngine)
 
 target_sources(KairoPhysicsEngine
@@ -74,6 +76,8 @@ target_sources(KairoPhysicsEngine
             ConvexCollision.cppm
             Narrowphase.cppm
             ContactSolver.cppm
+            Joint.cppm
+            SolverIsland.cppm
             PhysicsDebug.cppm
             PhysicsWorld.cppm
             ProjectileSystem.cppm
@@ -81,7 +85,7 @@ target_sources(KairoPhysicsEngine
             KairoPhysicsEngine.cppm
 )
 
-target_link_libraries(KairoPhysicsEngine PUBLIC KairoPhysicsMath KairoSpatial)
+target_link_libraries(KairoPhysicsEngine PUBLIC KairoPhysicsMath KairoSpatial Threads::Threads)
 
 # The debug window consumes the engine target, so it must be declared only
 # after the module library and its dependency graph are complete.

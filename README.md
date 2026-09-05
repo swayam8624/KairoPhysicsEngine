@@ -7,10 +7,10 @@ stack.
 KairoMath -> KairoPhysicsMath -> KairoGeometry -> KairoSpatial -> KairoPhysicsEngine
 ```
 
-It owns body/collider storage, broadphase, narrowphase, contact solving, fixed
-stepping, debug extraction, scene queries, contact events, and sandbox tooling.
-It is still not the final game runtime, editor, character controller package, or
-joint/constraint graph.
+It owns body/collider/joint storage, broadphase, narrowphase, island partitioning,
+contact and constraint solving, fixed stepping, debug extraction, scene queries,
+contact events, and sandbox tooling. It is still not the final game runtime,
+editor, or character controller package.
 
 ## Quickstart
 
@@ -129,6 +129,8 @@ Last-step profiling: total, broadphase, narrowphase, solver timings
 Plane pairing for infinite plane colliders
 Sphere-sphere, sphere-plane, sphere-box, AABB-AABB, AABB-plane, box-box, mixed box-AABB SAT, and box-plane contacts
 Sequential impulse solver with geometrically matched persistent multi-point manifolds and warm-started normal/friction impulses
+Distance, ball-socket, fixed, and hinge rigid-body joints with stable deletion-safe IDs
+Deterministic solver-island graph spanning contacts and joints, with optional parallel island worker dispatch
 Separate velocity and position solver iterations
 Baumgarte position correction with static-body protection
 Fixed timestep accumulator through PhysicsWorld::StepFixed
@@ -154,7 +156,9 @@ Collider             sphere/capsule/plane/AABB/box colliders, filters, world bou
 Broadphase           persistent KairoSpatial DynamicAABBTree pair generation
 ConvexCollision      support maps, GJK/EPA, hull raycasts and point separation
 Narrowphase          exact contact generation, box SAT, and deterministic four-point face manifolds
-ContactSolver        warm-started sequential impulses and position correction
+ContactSolver        warm-started sequential contact impulses
+Joint                distance/ball/fixed/hinge records plus velocity/position constraint solving
+SolverIsland         deterministic contact/joint graph partitioning and optional parallel dispatch
 PhysicsDebug         renderer-agnostic debug contacts and AABBs
 PhysicsWorld         ownership, fixed stepping, events, collision response rules, overlap/raycast/sweep queries, sandbox-facing API
 ProjectileSystem     continuous gameplay projectile lifecycle and impact behavior
@@ -292,6 +296,38 @@ world.SetColliderTrigger(sensorCollider, true);
 Triggers still generate `ContactManifold` records and contact events, but the
 solver skips warm starting, impulses, and position correction.
 
+## Joints And Solver Islands
+
+Joint creation uses world-space authoring inputs and stores body-local anchors so
+constraints survive body motion without baking transient world coordinates:
+
+```cpp
+JointID hinge = world.CreateHingeJoint(
+    chassisBody,
+    doorBody,
+    hingeWorldPosition,
+    Vec3f::Up());
+```
+
+Connected bodies do not collide by default; pass `collideConnected=true` when a
+mechanism intentionally needs both the constraint and collision response. Distance,
+ball-socket, fixed, and hinge joints are solved in the same velocity/position
+iterations as contacts.
+
+Every step builds deterministic solver islands from blocking contacts and active
+joints. Static and kinematic bodies are island boundaries rather than graph bridges,
+so two crates touching the same floor remain independent islands. Parallel dispatch
+is opt-in:
+
+```cpp
+world.Settings.EnableParallelIslands = true;
+world.Settings.ParallelIslandMinCount = 4;
+```
+
+Each worker owns a disjoint set of dynamic bodies; contacts/joints inside one island
+remain sequential and deterministic, while independent islands can execute in
+parallel without cross-island body writes.
+
 ## Contact Convention
 
 Contact normals point from body A toward body B. The solver applies:
@@ -390,8 +426,6 @@ Still deferred:
 
 ```text
 Dynamic/kinematic concave triangle-mesh bodies (static triangle meshes are implemented)
-Island solver and parallel island dispatch
-Joints and articulated constraints
 Serialization/replay file format
 Full editor/ImGui tooling
 ```
@@ -402,7 +436,7 @@ Those belong to later engine phases, not `KairoPhysicsMath`.
 
 The rigid body engine now has convex hull validation, GJK/EPA, filtering,
 response, query, callback surfaces, and persistent multi-point warm-started contact manifolds.
-Near-term rigid-body work should add joints and island solving before larger
+Near-term foundation work should add serialization/replay before larger
 physics families are added. Those families should be separate modules that reuse the same
 world/query/event conventions:
 
