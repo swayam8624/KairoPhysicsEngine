@@ -9,6 +9,7 @@ module;
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -112,6 +113,54 @@ export namespace kairo::foundation::physics
         std::uint32_t LayerA = CollisionLayer::Default;
         std::uint32_t LayerB = CollisionLayer::Default;
         CollisionResponse Response = CollisionResponse::Block;
+    };
+
+    inline constexpr std::uint32_t PhysicsWorldSnapshotVersion = 1u;
+
+    /// Serializable identity for one contact pair from the previous simulation
+    /// step. It intentionally stores no callback/function state.
+    struct PhysicsContactKeySnapshot final
+    {
+        BodyID BodyA = InvalidBodyID;
+        BodyID BodyB = InvalidBodyID;
+        ColliderID ColliderA = InvalidColliderID;
+        ColliderID ColliderB = InvalidColliderID;
+        bool IsTrigger = false;
+        CollisionResponse Response = CollisionResponse::Block;
+    };
+
+    /// Serializable warm-start entry. Anchors are body-local so cached impulses
+    /// remain meaningful after restoring the body's world transform.
+    struct PhysicsContactCacheSnapshot final
+    {
+        BodyID BodyA = InvalidBodyID;
+        BodyID BodyB = InvalidBodyID;
+        ColliderID ColliderA = InvalidColliderID;
+        ColliderID ColliderB = InvalidColliderID;
+        Vec3f LocalAnchorA = Vec3f::Zero();
+        Vec3f LocalAnchorB = Vec3f::Zero();
+        Vec3f Normal = Vec3f::Up();
+        float NormalImpulse = 0.0f;
+        float TangentImpulse = 0.0f;
+    };
+
+    /// Complete deterministic simulation state owned by PhysicsWorld.
+    /// Wall-clock profiling and host callbacks are deliberately excluded.
+    struct PhysicsWorldSnapshot final
+    {
+        std::uint32_t Version = PhysicsWorldSnapshotVersion;
+        PhysicsStepSettings Settings;
+        Vec3f Gravity = DefaultGravity;
+        std::vector<RigidBody> Bodies;
+        std::vector<Collider> Colliders;
+        std::vector<Joint> Joints;
+        std::vector<BroadphasePair> LastPairs;
+        std::vector<ContactManifold> LastContacts;
+        std::vector<CollisionPairResponseRule> PairResponses;
+        std::vector<CollisionLayerResponseRule> LayerResponses;
+        std::vector<PhysicsContactKeySnapshot> PreviousContactKeys;
+        std::vector<PhysicsContactCacheSnapshot> ContactCache;
+        float FixedAccumulator = 0.0f;
     };
 
     class PhysicsWorld final
@@ -1139,7 +1188,287 @@ export namespace kairo::foundation::physics
             return closest;
         }
 
+        /// Capture all deterministic world-owned simulation state. Host callbacks
+        /// and wall-clock profiling are excluded because they are I/O/diagnostic
+        /// bindings rather than simulation state.
+        [[nodiscard]]
+        PhysicsWorldSnapshot CaptureSnapshot() const
+        {
+            PhysicsWorldSnapshot snapshot;
+            snapshot.Settings = Settings;
+            snapshot.Gravity = Gravity;
+            snapshot.Bodies = m_Bodies;
+            snapshot.Colliders = m_Colliders;
+            snapshot.Joints = m_Joints;
+            snapshot.LastPairs = m_LastPairs;
+            snapshot.LastContacts = m_LastContacts;
+            snapshot.PairResponses = m_PairResponses;
+            snapshot.LayerResponses = m_LayerResponses;
+            snapshot.FixedAccumulator = m_FixedAccumulator;
+            snapshot.PreviousContactKeys.reserve(m_PreviousContactKeys.size());
+            for (const ContactEventKey& key : m_PreviousContactKeys)
+            {
+                snapshot.PreviousContactKeys.push_back({
+                    key.BodyA, key.BodyB, key.ColliderA, key.ColliderB,
+                    key.IsTrigger, key.Response });
+            }
+            snapshot.ContactCache.reserve(m_ContactCache.size());
+            for (const ContactCacheEntry& entry : m_ContactCache)
+            {
+                snapshot.ContactCache.push_back({
+                    entry.BodyA, entry.BodyB, entry.ColliderA, entry.ColliderB,
+                    entry.LocalAnchorA, entry.LocalAnchorB, entry.Normal,
+                    entry.NormalImpulse, entry.TangentImpulse });
+            }
+            return snapshot;
+        }
+
+        /// Replace deterministic simulation state only after the complete
+        /// snapshot validates. Existing host callbacks survive restoration.
+        void RestoreSnapshot(const PhysicsWorldSnapshot& snapshot)
+        {
+            ValidateSnapshot(snapshot);
+
+            std::vector<Collider> validatedColliders = snapshot.Colliders;
+            for (std::size_t index = 0u; index < validatedColliders.size(); ++index)
+            {
+                Collider& collider = validatedColliders[index];
+                if (!collider.Active)
+                {
+                    continue;
+                }
+                Collider rebuilt = MakeCollider(
+                    collider.ID,
+                    collider.Body,
+                    collider.Shape,
+                    collider.Material,
+                    collider.LocalCenter,
+                    collider.LocalRotation);
+                rebuilt.BelongsTo = collider.BelongsTo;
+                rebuilt.CollidesWith = collider.CollidesWith;
+                rebuilt.IsTrigger = collider.IsTrigger;
+                rebuilt.LayerMask = collider.LayerMask;
+                validatedColliders[index] = std::move(rebuilt);
+            }
+
+            Settings = snapshot.Settings;
+            Gravity = snapshot.Gravity;
+            m_Bodies = snapshot.Bodies;
+            m_Colliders = std::move(validatedColliders);
+            m_Joints = snapshot.Joints;
+            m_LastPairs = snapshot.LastPairs;
+            m_LastContacts = snapshot.LastContacts;
+            m_PairResponses = snapshot.PairResponses;
+            m_LayerResponses = snapshot.LayerResponses;
+            m_FixedAccumulator = snapshot.FixedAccumulator;
+            m_LastEvents.clear();
+            m_LastProfile = {};
+
+            m_PreviousContactKeys.clear();
+            m_PreviousContactKeys.reserve(snapshot.PreviousContactKeys.size());
+            for (const PhysicsContactKeySnapshot& key : snapshot.PreviousContactKeys)
+            {
+                m_PreviousContactKeys.push_back({
+                    key.BodyA, key.BodyB, key.ColliderA, key.ColliderB,
+                    key.IsTrigger, key.Response });
+            }
+
+            m_ContactCache.clear();
+            m_ContactCache.reserve(snapshot.ContactCache.size());
+            for (const PhysicsContactCacheSnapshot& entry : snapshot.ContactCache)
+            {
+                m_ContactCache.push_back({
+                    entry.BodyA, entry.BodyB, entry.ColliderA, entry.ColliderB,
+                    entry.LocalAnchorA, entry.LocalAnchorB, entry.Normal,
+                    entry.NormalImpulse, entry.TangentImpulse });
+            }
+
+            m_Broadphase.Clear();
+            m_Broadphase.Sync(m_Bodies, m_Colliders);
+            m_LastIslands = BuildSolverIslands(m_Bodies, m_LastContacts, m_Joints);
+        }
+
     private:
+        static void ValidateSnapshot(const PhysicsWorldSnapshot& snapshot)
+        {
+            if (snapshot.Version != PhysicsWorldSnapshotVersion)
+            {
+                throw std::invalid_argument("PhysicsWorldSnapshot has an unsupported version.");
+            }
+            ValidateStepSettings(snapshot.Settings, 1.0f / 60.0f);
+            RequireFinite(snapshot.Gravity, "PhysicsWorldSnapshot.Gravity");
+            RequireNonNegative(snapshot.FixedAccumulator,
+                "PhysicsWorldSnapshot.FixedAccumulator");
+
+            const auto finiteQuaternion = [](const Quaternionf& value, const char* name)
+            {
+                RequireFinite(value.x, name);
+                RequireFinite(value.y, name);
+                RequireFinite(value.z, name);
+                RequireFinite(value.w, name);
+                const float lengthSquared =
+                    value.x * value.x + value.y * value.y +
+                    value.z * value.z + value.w * value.w;
+                if (lengthSquared <= 1.0e-10f)
+                    throw std::invalid_argument(std::string(name) + " must be non-zero.");
+            };
+            const auto finiteMatrix = [](const Matrix3f& value, const char* name)
+            {
+                for (std::size_t index = 0u; index < Matrix3f::ElementCount; ++index)
+                    RequireFinite(value[index], name);
+            };
+            const auto validResponse = [](CollisionResponse response)
+            {
+                switch (response)
+                {
+                case CollisionResponse::Ignore:
+                case CollisionResponse::Trigger:
+                case CollisionResponse::Block:
+                    return;
+                }
+                throw std::invalid_argument("Snapshot contains an invalid CollisionResponse.");
+            };
+
+            for (std::size_t index = 0u; index < snapshot.Bodies.size(); ++index)
+            {
+                const RigidBody& body = snapshot.Bodies[index];
+                if (body.ID != static_cast<BodyID>(index))
+                    throw std::invalid_argument("Snapshot body IDs must equal stable vector indices.");
+                switch (body.Type)
+                {
+                case BodyType::Static:
+                case BodyType::Kinematic:
+                case BodyType::Dynamic:
+                    break;
+                default:
+                    throw std::invalid_argument("Snapshot contains an invalid BodyType.");
+                }
+                switch (body.CollisionDetection)
+                {
+                case CollisionDetectionMode::Discrete:
+                case CollisionDetectionMode::Continuous:
+                    break;
+                default:
+                    throw std::invalid_argument("Snapshot contains an invalid collision detection mode.");
+                }
+                RequireFinite(body.State.Position, "Snapshot.Body.Position");
+                finiteQuaternion(body.State.Rotation, "Snapshot.Body.Rotation");
+                RequireFinite(body.State.LinearVelocity, "Snapshot.Body.LinearVelocity");
+                RequireFinite(body.State.AngularVelocity, "Snapshot.Body.AngularVelocity");
+                RequireFinite(body.Forces.Force, "Snapshot.Body.Force");
+                RequireFinite(body.Forces.Torque, "Snapshot.Body.Torque");
+                RequireNonNegative(body.Mass.Mass, "Snapshot.Body.Mass");
+                RequireNonNegative(body.Mass.InverseMass, "Snapshot.Body.InverseMass");
+                RequireFinite(body.Mass.LocalCenterOfMass, "Snapshot.Body.LocalCenterOfMass");
+                finiteMatrix(body.Mass.LocalInertiaTensor, "Snapshot.Body.LocalInertiaTensor");
+                finiteMatrix(body.Mass.LocalInverseInertiaTensor,
+                    "Snapshot.Body.LocalInverseInertiaTensor");
+                RequireFinite(body.GravityScale, "Snapshot.Body.GravityScale");
+                RequireNonNegative(body.LinearDamping, "Snapshot.Body.LinearDamping");
+                RequireNonNegative(body.AngularDamping, "Snapshot.Body.AngularDamping");
+                RequirePositive(body.MaxLinearSpeed, "Snapshot.Body.MaxLinearSpeed");
+                RequirePositive(body.MaxAngularSpeed, "Snapshot.Body.MaxAngularSpeed");
+                RequireNonNegative(body.SleepTimer, "Snapshot.Body.SleepTimer");
+                if (body.Active && body.Type == BodyType::Dynamic && body.Mass.InverseMass <= 0.0f)
+                    throw std::invalid_argument("Active dynamic snapshot body requires positive inverse mass.");
+            }
+
+            for (std::size_t index = 0u; index < snapshot.Colliders.size(); ++index)
+            {
+                const Collider& collider = snapshot.Colliders[index];
+                if (collider.ID != static_cast<ColliderID>(index))
+                    throw std::invalid_argument("Snapshot collider IDs must equal stable vector indices.");
+                if (!collider.Active)
+                    continue;
+                if (collider.Body >= snapshot.Bodies.size() ||
+                    !snapshot.Bodies[collider.Body].Active)
+                    throw std::invalid_argument("Active snapshot collider references an inactive body.");
+                if (std::holds_alternative<TriangleMeshCollider>(collider.Shape) &&
+                    snapshot.Bodies[collider.Body].Type != BodyType::Static)
+                    throw std::invalid_argument("Snapshot triangle meshes must remain static-only.");
+                [[maybe_unused]] const Collider validated = MakeCollider(
+                    collider.ID, collider.Body, collider.Shape, collider.Material,
+                    collider.LocalCenter, collider.LocalRotation);
+                if (collider.BelongsTo == 0u || collider.LayerMask == 0u)
+                    throw std::invalid_argument("Snapshot collider category mask cannot be zero.");
+            }
+
+            for (std::size_t index = 0u; index < snapshot.Joints.size(); ++index)
+            {
+                const Joint& joint = snapshot.Joints[index];
+                if (joint.ID != static_cast<JointID>(index))
+                    throw std::invalid_argument("Snapshot joint IDs must equal stable vector indices.");
+                if (!joint.Active)
+                    continue;
+                if (joint.BodyA >= snapshot.Bodies.size() ||
+                    joint.BodyB >= snapshot.Bodies.size() ||
+                    !snapshot.Bodies[joint.BodyA].Active ||
+                    !snapshot.Bodies[joint.BodyB].Active ||
+                    joint.BodyA == joint.BodyB)
+                    throw std::invalid_argument("Active snapshot joint has invalid body references.");
+                std::visit([&](const auto& constraint)
+                {
+                    using T = std::decay_t<decltype(constraint)>;
+                    if constexpr (std::is_same_v<T, DistanceJoint>)
+                        [[maybe_unused]] const auto validated = MakeDistanceJoint(
+                            joint.ID, joint.BodyA, joint.BodyB,
+                            constraint.LocalAnchorA, constraint.LocalAnchorB,
+                            constraint.RestLength, joint.CollideConnected);
+                    else if constexpr (std::is_same_v<T, BallSocketJoint>)
+                        [[maybe_unused]] const auto validated = MakeBallSocketJoint(
+                            joint.ID, joint.BodyA, joint.BodyB,
+                            constraint.LocalAnchorA, constraint.LocalAnchorB,
+                            joint.CollideConnected);
+                    else if constexpr (std::is_same_v<T, FixedJoint>)
+                        [[maybe_unused]] const auto validated = MakeFixedJoint(
+                            joint.ID, joint.BodyA, joint.BodyB,
+                            constraint.LocalAnchorA, constraint.LocalAnchorB,
+                            constraint.ReferenceRotation, joint.CollideConnected);
+                    else if constexpr (std::is_same_v<T, HingeJoint>)
+                        [[maybe_unused]] const auto validated = MakeHingeJoint(
+                            joint.ID, joint.BodyA, joint.BodyB,
+                            constraint.LocalAnchorA, constraint.LocalAnchorB,
+                            constraint.LocalAxisA, constraint.LocalAxisB,
+                            joint.CollideConnected);
+                }, joint.Constraint);
+            }
+
+            for (const CollisionPairResponseRule& rule : snapshot.PairResponses)
+            {
+                validResponse(rule.Response);
+                if (rule.ColliderA >= snapshot.Colliders.size() ||
+                    rule.ColliderB >= snapshot.Colliders.size() ||
+                    rule.ColliderA == rule.ColliderB)
+                    throw std::invalid_argument("Snapshot pair response references invalid colliders.");
+            }
+            for (const CollisionLayerResponseRule& rule : snapshot.LayerResponses)
+            {
+                validResponse(rule.Response);
+                if (rule.LayerA == 0u || rule.LayerB == 0u)
+                    throw std::invalid_argument("Snapshot layer response contains a zero mask.");
+            }
+            for (const PhysicsContactKeySnapshot& key : snapshot.PreviousContactKeys)
+            {
+                validResponse(key.Response);
+                if (key.BodyA >= snapshot.Bodies.size() || key.BodyB >= snapshot.Bodies.size() ||
+                    key.ColliderA >= snapshot.Colliders.size() ||
+                    key.ColliderB >= snapshot.Colliders.size())
+                    throw std::invalid_argument("Snapshot previous-contact key is out of range.");
+            }
+            for (const PhysicsContactCacheSnapshot& entry : snapshot.ContactCache)
+            {
+                if (entry.BodyA >= snapshot.Bodies.size() || entry.BodyB >= snapshot.Bodies.size() ||
+                    entry.ColliderA >= snapshot.Colliders.size() ||
+                    entry.ColliderB >= snapshot.Colliders.size())
+                    throw std::invalid_argument("Snapshot contact-cache entry is out of range.");
+                RequireFinite(entry.LocalAnchorA, "Snapshot.ContactCache.LocalAnchorA");
+                RequireFinite(entry.LocalAnchorB, "Snapshot.ContactCache.LocalAnchorB");
+                RequireFinite(entry.Normal, "Snapshot.ContactCache.Normal");
+                RequireNonNegative(entry.NormalImpulse, "Snapshot.ContactCache.NormalImpulse");
+                RequireFinite(entry.TangentImpulse, "Snapshot.ContactCache.TangentImpulse");
+            }
+        }
+
         std::vector<RigidBody> m_Bodies;
         std::vector<Collider> m_Colliders;
         std::vector<Joint> m_Joints;
