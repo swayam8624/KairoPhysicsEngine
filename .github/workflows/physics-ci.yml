@@ -2,7 +2,9 @@ name: KairoPhysicsEngine CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'complete/**'
   pull_request:
   workflow_dispatch:
 
