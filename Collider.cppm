@@ -451,7 +451,16 @@ export namespace kairo::foundation::physics
             std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t>
                 edgeUse;
             std::vector<std::uint32_t> vertexUse(hull->Vertices.size(), 0u);
-            std::set<std::array<std::uint32_t, 3>> uniqueFaces;
+            const auto faceIndexLess =
+      [](const std::array<std::uint32_t, 3>& lhs,
+         const std::array<std::uint32_t, 3>& rhs) noexcept
+      {
+          if (lhs[0] != rhs[0]) return lhs[0] < rhs[0];
+          if (lhs[1] != rhs[1]) return lhs[1] < rhs[1];
+          return lhs[2] < rhs[2];
+      };
+  std::set<std::array<std::uint32_t, 3>, decltype(faceIndexLess)>
+      uniqueFaces(faceIndexLess);
 
             for (auto& face : hull->Faces)
             {
