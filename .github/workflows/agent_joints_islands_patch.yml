@@ -1,0 +1,42 @@
+name: Agent Joints And Solver Islands Patch
+on:
+  push:
+    branches:
+      - complete/joints-solver-islands
+permissions:
+  contents: write
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: complete/joints-solver-islands
+          fetch-depth: 0
+      - name: Apply joints and islands implementation
+        shell: bash
+        run: python3 .github/scripts/agent_joints_islands_patch.py
+      - name: Configure validation build
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DKAIRO_PHYSICS_ENGINE_BUILD_TESTS=ON \
+            -DKAIRO_PHYSICS_ENGINE_BUILD_SANDBOX=OFF \
+            -DKAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX=OFF
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure
+      - name: Commit validated implementation
+        shell: bash
+        run: |
+          rm -rf build
+          git rm .github/scripts/agent_joints_islands_patch.py .github/workflows/agent_joints_islands_patch.yml
+          git add Joint.cppm SolverIsland.cppm PhysicsEngineTypes.cppm CMakeLists.txt KairoPhysicsEngine.cppm PhysicsWorld.cppm sandbox/TerminalRenderer.cppm tests/PhysicsEngineTests.cpp README.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Physics: add joints and solver islands"
+          git push origin HEAD:complete/joints-solver-islands
