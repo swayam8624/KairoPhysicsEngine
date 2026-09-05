@@ -11,7 +11,7 @@ on:
 permissions:
   contents: read
 
-# Feature-completion branches validate the exact branch head on every supported toolchain.
+# Completion branches validate their exact, self-contained head on every supported toolchain.
 jobs:
   build-test:
     name: ${{ matrix.name }}
