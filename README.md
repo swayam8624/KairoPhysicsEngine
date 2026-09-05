@@ -385,9 +385,10 @@ Those belong to later engine phases, not `KairoPhysicsMath`.
 ## Physics Roadmap
 
 The rigid body engine now has convex hull validation, GJK/EPA, filtering,
-response, query, and callback surfaces. Near-term rigid-body work should add
-general CCD, joints, and island solving before larger physics families are added. Those families
-should be separate modules that reuse the same world/query/event conventions:
+response, query, callback surfaces, and persistent multi-point warm-started contact manifolds.
+Near-term rigid-body work should add general CCD, joints, and island solving before larger
+physics families are added. Those families should be separate modules that reuse the same
+world/query/event conventions:
 
 ```text
 KairoParticles      particle emitters, forces, constraints, collision events
