@@ -1,6 +1,8 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <variant>
+#include <filesystem>
+#include <fstream>
 
 import Kairo.Foundation.PhysicsEngine;
 import Kairo.Foundation.PhysicsMath;
@@ -1930,4 +1932,125 @@ TEST_CASE("Invalid world inputs throw", "[PhysicsEngine][Validation]")
     PhysicsWorld invalidSettingsWorld;
     invalidSettingsWorld.Settings.PositionIterations = 0;
     REQUIRE_THROWS_AS(invalidSettingsWorld.Step(1.0f / 60.0f), std::invalid_argument);
+}
+
+
+TEST_CASE("Physics snapshots round-trip deterministic world state",
+    "[PhysicsEngine][Serialization]")
+{
+    PhysicsWorld world;
+    world.Settings.EnableSleeping = false;
+    world.Settings.EnableParallelIslands = true;
+    world.Gravity = Vec3f{ 0.0f, -9.5f, 0.0f };
+
+    const BodyID floor = world.CreateRigidBody(StaticBody());
+    const ColliderID floorCollider = world.AddCollider(floor, FloorMesh());
+    const BodyID box = world.CreateRigidBody(DynamicBoxBody(Vec3f{ 0.0f, 1.0f, 0.0f }));
+    const ColliderID boxCollider = world.AddCollider(box, BoxCollider{});
+    world.SetCollisionFilter(boxCollider, CollisionLayer::DynamicWorld,
+        CollisionLayer::StaticWorld | CollisionLayer::DynamicWorld);
+    world.SetCollisionFilter(floorCollider, CollisionLayer::StaticWorld, CollisionLayer::DynamicWorld);
+    world.SetBodyCollisionDetectionMode(box, CollisionDetectionMode::Continuous);
+    [[maybe_unused]] const JointID tether = world.CreateDistanceJoint(
+        floor, box, Vec3f::Zero(), Vec3f{ 0.0f, 1.0f, 0.0f }, 1.0f, true);
+    world.SetCollisionPairResponse(floorCollider, boxCollider, CollisionResponse::Block);
+    world.AddBodyForce(box, Vec3f{ 3.0f, 0.0f, 0.0f });
+    [[maybe_unused]] const auto fixedSteps = world.StepFixed(0.013f, 1.0f / 120.0f, 8u);
+
+    const std::uint64_t before = PhysicsStateHash(world);
+    const auto bytes = SerializePhysicsWorldSnapshot(world.CaptureSnapshot());
+    REQUIRE_FALSE(bytes.empty());
+
+    PhysicsWorld restored;
+    restored.RestoreSnapshot(DeserializePhysicsWorldSnapshot(bytes));
+    CHECK(PhysicsStateHash(restored) == before);
+    CHECK(restored.Bodies().size() == world.Bodies().size());
+    CHECK(restored.Colliders().size() == world.Colliders().size());
+    CHECK(restored.Joints().size() == world.Joints().size());
+    CHECK(restored.FixedAccumulator() == Catch::Approx(world.FixedAccumulator()));
+    REQUIRE(std::holds_alternative<TriangleMeshCollider>(restored.Colliders().at(floorCollider).Shape));
+    CHECK_FALSE(std::get<TriangleMeshCollider>(restored.Colliders().at(floorCollider).Shape).Acceleration.Empty());
+
+    restored.Step(1.0f / 120.0f);
+    world.Step(1.0f / 120.0f);
+    CHECK(PhysicsStateHash(restored) == PhysicsStateHash(world));
+}
+
+TEST_CASE("Physics snapshot file load is strong-exception safe",
+    "[PhysicsEngine][Serialization][File]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    const BodyID body = world.CreateRigidBody(DynamicSphereBody(Vec3f{ 1.0f, 2.0f, 3.0f }));
+    world.AddCollider(body, SphereCollider{ 0.5f });
+    const std::uint64_t expected = PhysicsStateHash(world);
+
+    const auto path = std::filesystem::temp_directory_path() / "kairo-physics-snapshot-test.kphys";
+    SavePhysicsWorld(path, world);
+    PhysicsWorld loaded;
+    LoadPhysicsWorld(path, loaded);
+    CHECK(PhysicsStateHash(loaded) == expected);
+
+    { std::ofstream corrupt(path, std::ios::binary | std::ios::trunc); corrupt << "bad"; }
+    REQUIRE_THROWS(LoadPhysicsWorld(path, loaded));
+    CHECK(PhysicsStateHash(loaded) == expected);
+    std::error_code ec; std::filesystem::remove(path, ec);
+}
+
+TEST_CASE("Physics replay reproduces command-driven simulation and detects divergence",
+    "[PhysicsEngine][Replay]")
+{
+    PhysicsWorld recordedWorld;
+    recordedWorld.Gravity = Vec3f::Zero();
+    recordedWorld.Settings.EnableSleeping = false;
+    const BodyID body = recordedWorld.CreateRigidBody(DynamicSphereBody(Vec3f::Zero(), 0.25f));
+    recordedWorld.AddCollider(body, SphereCollider{ 0.25f });
+
+    PhysicsReplayRecorder recorder(recordedWorld, 1.0f / 120.0f);
+    for (int frame = 0; frame < 40; ++frame)
+    {
+        std::vector<PhysicsReplayCommand> commands;
+        if (frame < 10) commands.push_back(ReplayAddForce{ body, Vec3f{ 2.0f, 0.5f, 0.0f } });
+        if (frame == 12) commands.push_back(ReplayImpulseAtPoint{ body, Vec3f{ 0.0f, 1.0f, 0.0f }, Vec3f::Zero() });
+        recorder.Step(recordedWorld, std::move(commands));
+    }
+
+    PhysicsReplay replay = std::move(recorder).TakeReplay();
+    const auto replayBytes = SerializePhysicsReplay(replay);
+    const PhysicsReplay parsed = DeserializePhysicsReplay(replayBytes);
+    PhysicsWorld playback;
+    const PhysicsReplayVerification verified = VerifyPhysicsReplay(parsed, playback);
+    CHECK(verified.Matched);
+    CHECK(verified.VerifiedFrames == 40u);
+    CHECK(PhysicsStateHash(playback) == PhysicsStateHash(recordedWorld));
+
+    PhysicsReplay divergent = parsed;
+    REQUIRE(divergent.Frames.size() > 5u);
+    divergent.Frames[5].ExpectedStateHash ^= 0x1ull;
+    PhysicsWorld divergenceWorld;
+    const PhysicsReplayVerification mismatch = VerifyPhysicsReplay(divergent, divergenceWorld);
+    CHECK_FALSE(mismatch.Matched);
+    CHECK(mismatch.DivergentFrame == 5u);
+    CHECK(mismatch.ExpectedHash != mismatch.ActualHash);
+}
+
+TEST_CASE("Physics snapshot and replay parsers reject truncation and trailing data",
+    "[PhysicsEngine][Serialization][Validation]")
+{
+    PhysicsWorld world;
+    const auto snapshot = SerializePhysicsWorldSnapshot(world.CaptureSnapshot());
+    REQUIRE(snapshot.size() > 8u);
+    auto truncated = snapshot;
+    truncated.pop_back();
+    REQUIRE_THROWS(DeserializePhysicsWorldSnapshot(truncated));
+    auto trailing = snapshot;
+    trailing.push_back(0xffu);
+    REQUIRE_THROWS(DeserializePhysicsWorldSnapshot(trailing));
+
+    PhysicsReplay replay;
+    replay.InitialState = world.CaptureSnapshot();
+    const auto replayBytes = SerializePhysicsReplay(replay);
+    auto badReplay = replayBytes;
+    badReplay.pop_back();
+    REQUIRE_THROWS(DeserializePhysicsReplay(badReplay));
 }

@@ -80,6 +80,8 @@ target_sources(KairoPhysicsEngine
             SolverIsland.cppm
             PhysicsDebug.cppm
             PhysicsWorld.cppm
+            PhysicsSerialization.cppm
+            PhysicsReplay.cppm
             ProjectileSystem.cppm
             Buoyancy.cppm
             KairoPhysicsEngine.cppm

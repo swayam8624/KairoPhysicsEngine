@@ -420,13 +420,35 @@ water.Step(world, dt);
 world.Step(dt);
 ```
 
+## Serialization And Deterministic Replay
+
+`PhysicsWorld::CaptureSnapshot()` captures deterministic simulation-owned state,
+including bodies, colliders, joints, filters, the fixed-step accumulator, previous
+contact identity, and geometrically matched warm-start impulses. Host callbacks and
+wall-clock profiling remain outside snapshots. `RestoreSnapshot()` validates the
+complete replacement before mutating the destination and rebuilds derived broadphase
+and mesh-BVH state.
+
+`SavePhysicsWorld` / `LoadPhysicsWorld` use the bounded versioned `KPHYS01` binary
+format. Numeric fields are explicit little-endian IEEE-754 values; shape and joint
+variants use stable tags rather than C++ enum ordinals or native struct dumps.
+Malformed counts, truncation, trailing bytes, invalid references, non-finite state,
+and unsupported versions fail explicitly.
+
+`PhysicsReplayRecorder` stores one initial snapshot followed by deterministic
+per-fixed-step commands and the expected state hash after each frame. The V1 command
+surface covers forces, torques, impulses, authored motion-state changes, wake events,
+and CCD-mode changes. `VerifyPhysicsReplay` restores the initial state, re-simulates
+those commands, and reports the first divergent frame/hash. Structural world edits
+(create/destroy bodies, colliders, or joints) must currently occur before recording
+or be represented by a new replay command in a future format version.
+
 ## Current Limits
 
 Still deferred:
 
 ```text
 Dynamic/kinematic concave triangle-mesh bodies (static triangle meshes are implemented)
-Serialization/replay file format
 Full editor/ImGui tooling
 ```
 
@@ -436,8 +458,8 @@ Those belong to later engine phases, not `KairoPhysicsMath`.
 
 The rigid body engine now has convex hull validation, GJK/EPA, filtering,
 response, query, callback surfaces, and persistent multi-point warm-started contact manifolds.
-Near-term foundation work should add serialization/replay before larger
-physics families are added. Those families should be separate modules that reuse the same
+The rigid-body V1 foundation now includes versioned serialization and deterministic
+command replay. Larger physics families should remain separate modules. Those families should be separate modules that reuse the same
 world/query/event conventions:
 
 ```text

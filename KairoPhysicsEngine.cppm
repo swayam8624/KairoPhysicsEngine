@@ -12,5 +12,7 @@ export import Kairo.Foundation.PhysicsEngine.Joint;
 export import Kairo.Foundation.PhysicsEngine.SolverIsland;
 export import Kairo.Foundation.PhysicsEngine.Debug;
 export import Kairo.Foundation.PhysicsEngine.World;
+export import Kairo.Foundation.PhysicsEngine.Serialization;
+export import Kairo.Foundation.PhysicsEngine.Replay;
 export import Kairo.Foundation.PhysicsEngine.Projectile;
 export import Kairo.Foundation.PhysicsEngine.Buoyancy;
