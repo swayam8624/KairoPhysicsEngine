@@ -1,0 +1,41 @@
+name: Agent Narrowphase Import Fix
+
+on:
+  push:
+    branches:
+      - complete/triangle-mesh-collision
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: complete/triangle-mesh-collision
+          fetch-depth: 0
+
+      - name: Add explicit module dependencies
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('Narrowphase.cppm')
+          s = p.read_text()
+          s = s.replace('#include <cmath>\n#include <limits>', '#include <cmath>\n#include <cstdint>\n#include <limits>', 1)
+          s = s.replace('import Kairo.Foundation.Math.Vector;\nimport Kairo.Foundation.Geometry.Plane;', 'import Kairo.Foundation.Math.Vector;\nimport Kairo.Foundation.Math.Quaternion;\nimport Kairo.Foundation.Geometry.AABB;\nimport Kairo.Foundation.Geometry.Plane;', 1)
+          p.write_text(s)
+          PY
+
+      - name: Commit source fix and remove helper
+        shell: bash
+        run: |
+          rm .github/workflows/agent_narrowphase_import_fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Narrowphase.cppm .github/workflows/agent_narrowphase_import_fix.yml
+          git commit -m "Fix explicit narrowphase module imports"
+          git push origin HEAD:complete/triangle-mesh-collision
