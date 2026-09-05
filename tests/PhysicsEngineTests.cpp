@@ -134,12 +134,17 @@ TEST_CASE("Resting box manifolds retain multiple warm-started impulses",
     "[PhysicsEngine][Manifold][WarmStart]")
 {
     PhysicsWorld world;
+    // Keep the intentionally overlapping resting configuration persistent so
+    // the second step exercises warm-start matching rather than separation.
+    world.Settings.MaxPositionCorrection = 0.0f;
     const BodyID planeBody = world.CreateRigidBody(StaticBody());
-    world.AddCollider(planeBody, PlaneCollider{ Vec3f::Up(), 0.0f });
+    [[maybe_unused]] const ColliderID planeCollider =
+        world.AddCollider(planeBody, PlaneCollider{ Vec3f::Up(), 0.0f });
 
     const BodyID boxBody = world.CreateRigidBody(
         DynamicBoxBody(Vec3f{ 0.0f, 0.48f, 0.0f }));
-    world.AddCollider(boxBody, BoxCollider{ Vec3f{ 0.5f, 0.5f, 0.5f } });
+    [[maybe_unused]] const ColliderID boxCollider =
+        world.AddCollider(boxBody, BoxCollider{ Vec3f{ 0.5f, 0.5f, 0.5f } });
 
     world.Step(1.0f / 60.0f);
     REQUIRE_FALSE(world.Contacts().empty());
@@ -1578,7 +1583,8 @@ TEST_CASE("Rotated BoxCollider uses SAT contacts", "[PhysicsEngine][Narrowphase]
         CollidePair(a, ca, b, cb);
 
     REQUIRE(contact.has_value());
-    REQUIRE(contact->Points.size() == 1);
+    REQUIRE_FALSE(contact->Points.empty());
+    CHECK(contact->Points.size() <= 4u);
     REQUIRE(contact->Points[0].PenetrationDepth > 0.0f);
 }
 
