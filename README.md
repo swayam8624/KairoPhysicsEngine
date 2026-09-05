@@ -7,10 +7,10 @@ stack.
 KairoMath -> KairoPhysicsMath -> KairoGeometry -> KairoSpatial -> KairoPhysicsEngine
 ```
 
-It owns body/collider storage, broadphase, narrowphase, contact solving, fixed
-stepping, debug extraction, scene queries, contact events, and sandbox tooling.
-It is still not the final game runtime, editor, character controller package, or
-joint/constraint graph.
+It owns body/collider/joint storage, broadphase, narrowphase, island partitioning,
+contact and constraint solving, fixed stepping, debug extraction, scene queries,
+contact events, and sandbox tooling. It is still not the final game runtime,
+editor, or character controller package.
 
 ## Quickstart
 
