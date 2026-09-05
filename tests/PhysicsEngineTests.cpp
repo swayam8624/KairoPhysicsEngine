@@ -133,7 +133,8 @@ TEST_CASE("Static triangle meshes collide query raycast sweep and debug consiste
     CHECK(std::find(overlap.begin(), overlap.end(), floor) != overlap.end());
 
     const auto ray = world.Raycast(
-        Vec3f{ 0.0f, 2.0f, 0.0f }, -Vec3f::UnitY(), 10.0f);
+        Vec3f{ 0.0f, 2.0f, 0.0f }, -Vec3f::UnitY(), 10.0f,
+        0xFFFF'FFFFu, sphere);
     REQUIRE(ray.has_value());
     CHECK(ray->Collider == floor);
     CHECK(ray->Distance == Catch::Approx(2.0f).margin(1.0e-4f));
@@ -141,7 +142,8 @@ TEST_CASE("Static triangle meshes collide query raycast sweep and debug consiste
     CHECK(ray->Normal.y > 0.9f);
 
     const auto sweep = world.SweepSphere(
-        Vec3f{ 0.0f, 2.0f, 0.0f }, Vec3f{ 0.0f, -3.0f, 0.0f }, 0.25f);
+        Vec3f{ 0.0f, 2.0f, 0.0f }, Vec3f{ 0.0f, -3.0f, 0.0f }, 0.25f,
+        0xFFFF'FFFFu, sphere);
     REQUIRE(sweep.has_value());
     CHECK(sweep->Collider == floor);
     CHECK(sweep->TimeOfImpact == Catch::Approx(1.75f / 3.0f).margin(2.0e-3f));
