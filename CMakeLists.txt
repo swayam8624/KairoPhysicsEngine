@@ -10,7 +10,8 @@ option(KAIRO_PHYSICS_ENGINE_BUILD_SANDBOX "Build terminal KairoPhysicsEngine san
 option(KAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX "Build GLFW KairoPhysicsEngine debug sandbox when GLFW is available" ${PROJECT_IS_TOP_LEVEL})
 
 # Immutable standalone fallback revisions. The superproject supplies local
-# targets; these pins make a direct clone deterministic when it does not.
+# targets; these pins are clean-clone validated by PhysicsEngine CI so a direct
+# consumer receives the same dependency graph rather than moving branch heads.
 set(KAIRO_PHYSICS_ENGINE_PHYSICS_MATH_REVISION da0573edfbc38fcf518b2db8a2aba5c7e8b3b1b8)
 set(KAIRO_PHYSICS_ENGINE_SPATIAL_REVISION 40d34b83d7cdcfaf19407d85394b2b86c41e4d18)
 
