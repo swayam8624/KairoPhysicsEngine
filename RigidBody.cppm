@@ -15,7 +15,8 @@ export namespace kairo::foundation::physics
     using namespace kairo::foundation::math;
 
     /// Selects whether final dynamic translation is integrated discretely
-    /// or clipped against a conservative time-of-impact sweep.
+    /// or clipped against a conservative time-of-impact sweep. Discrete is
+    /// intentionally the default; Continuous is opt-in for fast movers.
     enum class CollisionDetectionMode : std::uint8_t
     {
         Discrete,
