@@ -3,7 +3,6 @@ name: Agent Triangle Mesh Apply
 on:
   push:
     branches:
-      - complete/opengl-fine-frame-passes
       - complete/triangle-mesh-collision
 
 permissions:
@@ -19,7 +18,7 @@ jobs:
           ref: complete/triangle-mesh-collision
           fetch-depth: 0
 
-      - name: Execute checked-in patch payload
+      - name: Execute checked-in source patch payload
         shell: bash
         run: |
           python3 <<'PY'
@@ -32,6 +31,11 @@ jobs:
           payload = workflow[begin:end]
           lines = payload.splitlines()
           payload = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines)
+          ci_marker = '# Permanent standalone CI for the physics repository.'
+          ci = payload.find(ci_marker)
+          if ci < 0:
+              raise SystemExit('permanent CI marker not found in payload')
+          payload = payload[:ci]
           exec(compile(payload, 'triangle_mesh_patch_payload.py', 'exec'), {'__name__': '__main__'})
           PY
 
