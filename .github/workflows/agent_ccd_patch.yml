@@ -1,0 +1,42 @@
+name: Agent Rigid Body CCD Patch
+on:
+  push:
+    branches:
+      - complete/rigid-body-ccd
+permissions:
+  contents: write
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: complete/rigid-body-ccd
+          fetch-depth: 0
+      - name: Apply CCD implementation
+        shell: bash
+        run: python3 .github/scripts/agent_ccd_patch.py
+      - name: Configure CCD validation build
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang ninja-build
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DKAIRO_PHYSICS_ENGINE_BUILD_TESTS=ON \
+            -DKAIRO_PHYSICS_ENGINE_BUILD_SANDBOX=OFF \
+            -DKAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX=OFF
+          cmake --build build --parallel
+          ctest --test-dir build --output-on-failure
+      - name: Commit validated CCD implementation
+        shell: bash
+        run: |
+          rm -rf build
+          git rm .github/scripts/agent_ccd_patch.py .github/workflows/agent_ccd_patch.yml
+          git add RigidBody.cppm PhysicsWorld.cppm README.md tests/PhysicsEngineTests.cpp
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Physics: add conservative rigid-body CCD"
+          git push origin HEAD:complete/rigid-body-ccd
