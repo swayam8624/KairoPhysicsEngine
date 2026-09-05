@@ -1,0 +1,46 @@
+name: Agent MSVC Face Comparator Fix
+on:
+  push:
+    branches:
+      - complete/triangle-mesh-collision
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: complete/triangle-mesh-collision
+          fetch-depth: 0
+      - name: Add explicit lexicographic face comparator
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('Collider.cppm')
+          s = p.read_text()
+          old = '''            std::set<std::array<std::uint32_t, 3>> uniqueFaces;'''
+          new = '''            const auto faceIndexLess =
+                [](const std::array<std::uint32_t, 3>& lhs,
+                   const std::array<std::uint32_t, 3>& rhs) noexcept
+                {
+                    if (lhs[0] != rhs[0]) return lhs[0] < rhs[0];
+                    if (lhs[1] != rhs[1]) return lhs[1] < rhs[1];
+                    return lhs[2] < rhs[2];
+                };
+            std::set<std::array<std::uint32_t, 3>, decltype(faceIndexLess)>
+                uniqueFaces(faceIndexLess);'''
+          if old not in s:
+              raise SystemExit('uniqueFaces declaration not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Commit source fix and remove helper
+        shell: bash
+        run: |
+          rm -f .github/workflows/agent_msvc_face_comparator_fix.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Fix MSVC face comparator portability'
+          git push origin HEAD:complete/triangle-mesh-collision
