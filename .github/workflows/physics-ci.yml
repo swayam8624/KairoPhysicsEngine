@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
 
+# Feature-completion branches validate their exact head in addition to PR merges.
 jobs:
   build-test:
     name: ${{ matrix.name }}
