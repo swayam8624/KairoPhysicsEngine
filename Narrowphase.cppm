@@ -2,6 +2,7 @@ module;
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <optional>
 #include <utility>
@@ -11,6 +12,8 @@ module;
 export module Kairo.Foundation.PhysicsEngine.Narrowphase;
 
 import Kairo.Foundation.Math.Vector;
+import Kairo.Foundation.Math.Quaternion;
+import Kairo.Foundation.Geometry.AABB;
 import Kairo.Foundation.Geometry.Plane;
 import Kairo.Foundation.Spatial.BVHTraversal;
 import Kairo.Foundation.PhysicsMath;
