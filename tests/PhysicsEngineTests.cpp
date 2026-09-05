@@ -85,6 +85,94 @@ namespace
 }
 
 
+
+TEST_CASE("Continuous sphere rigid body does not tunnel through a plane",
+    "[PhysicsEngine][CCD]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    const BodyID floorBody = world.CreateRigidBody(StaticBody());
+    [[maybe_unused]] const ColliderID floorCollider =
+        world.AddCollider(floorBody, PlaneCollider{ Vec3f::Up(), 0.0f });
+
+    RigidBodyDesc fastDesc =
+        DynamicSphereBody(Vec3f{ 0.0f, 2.0f, 0.0f }, 0.25f);
+    fastDesc.State.LinearVelocity = Vec3f{ 0.0f, -200.0f, 0.0f };
+    fastDesc.CollisionDetection = CollisionDetectionMode::Continuous;
+    const BodyID fastBody = world.CreateRigidBody(fastDesc);
+    [[maybe_unused]] const ColliderID fastCollider =
+        world.AddCollider(fastBody, SphereCollider{ 0.25f });
+
+    world.Step(1.0f / 60.0f);
+
+    CHECK(world.Bodies().at(fastBody).State.Position.y >= 0.24f);
+    CHECK(world.Bodies().at(fastBody).State.LinearVelocity.y >= 0.0f);
+}
+
+TEST_CASE("Continuous boxes use conservative shape bounds against thin walls",
+    "[PhysicsEngine][CCD]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    const BodyID wallBody = world.CreateRigidBody(StaticBody());
+    [[maybe_unused]] const ColliderID wallCollider =
+        world.AddCollider(
+            wallBody,
+            AABBCollider{ Vec3f{ 0.05f, 2.0f, 2.0f } });
+
+    const Vec3f halfExtents{ 0.2f, 0.2f, 0.2f };
+    RigidBodyDesc fastDesc =
+        DynamicBoxBody(Vec3f{ -2.0f, 0.0f, 0.0f }, halfExtents);
+    fastDesc.State.LinearVelocity = Vec3f{ 200.0f, 0.0f, 0.0f };
+    fastDesc.CollisionDetection = CollisionDetectionMode::Continuous;
+    const BodyID fastBody = world.CreateRigidBody(fastDesc);
+    [[maybe_unused]] const ColliderID fastCollider =
+        world.AddCollider(fastBody, BoxCollider{ halfExtents });
+
+    world.Step(0.02f);
+
+    CHECK(world.Bodies().at(fastBody).State.Position.x < -0.05f);
+    CHECK(world.Bodies().at(fastBody).State.LinearVelocity.x <= 0.0f);
+}
+
+TEST_CASE("Continuous rigid body CCD uses relative motion for dynamic targets",
+    "[PhysicsEngine][CCD]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    RigidBodyDesc aDesc =
+        DynamicSphereBody(Vec3f{ -1.0f, 0.0f, 0.0f }, 0.2f);
+    aDesc.State.LinearVelocity = Vec3f{ 100.0f, 0.0f, 0.0f };
+    aDesc.CollisionDetection = CollisionDetectionMode::Continuous;
+    const BodyID a = world.CreateRigidBody(aDesc);
+    [[maybe_unused]] const ColliderID colliderA =
+        world.AddCollider(a, SphereCollider{ 0.2f });
+
+    RigidBodyDesc bDesc =
+        DynamicSphereBody(Vec3f{ 1.0f, 0.0f, 0.0f }, 0.2f);
+    bDesc.State.LinearVelocity = Vec3f{ -100.0f, 0.0f, 0.0f };
+    const BodyID b = world.CreateRigidBody(bDesc);
+    [[maybe_unused]] const ColliderID colliderB =
+        world.AddCollider(b, SphereCollider{ 0.2f });
+
+    world.Step(0.012f);
+
+    const float separation =
+        world.Bodies().at(b).State.Position.x -
+        world.Bodies().at(a).State.Position.x;
+    CHECK(separation >= 0.39f);
+    CHECK(world.Bodies().at(a).State.Position.x <
+        world.Bodies().at(b).State.Position.x);
+    CHECK(world.Bodies().at(a).State.LinearVelocity.x <= 0.0f);
+    CHECK(world.Bodies().at(b).State.LinearVelocity.x >= 0.0f);
+}
+
 TEST_CASE("Box plane contact produces a stable four-point face manifold",
     "[PhysicsEngine][Manifold][Box][Plane]")
 {

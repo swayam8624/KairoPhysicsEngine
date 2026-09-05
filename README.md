@@ -110,6 +110,7 @@ Current engine surface:
 Stable vector-index body/collider ids with inactive deletion-safe records
 Dynamic, static, and kinematic body behavior
 Per-body gravity scale, damping, max velocity clamps, sleeping, and wake hooks
+Per-body Discrete/Continuous collision detection with relative-motion TOI clipping
 Sphere, plane, AABB, oriented box, validated convex-hull, and static triangle-mesh shapes
 CapsuleCollider with sphere/capsule/plane/AABB/oriented-box contacts
 GJK intersection and EPA penetration for convex hulls against finite convex shapes
@@ -326,6 +327,22 @@ std::vector<ColliderID> hits =
 
 Queries currently use active finite collider AABBs. Infinite planes are excluded.
 
+Rigid bodies default to inexpensive discrete integration. Fast dynamic bodies can
+opt into conservative CCD; the engine sweeps an enclosing sphere for each finite
+convex collider, evaluates relative dynamic-body translation, clips both bodies to
+the earliest blocking TOI, and applies a restitution-aware normal impact impulse:
+
+```cpp
+RigidBodyDesc bullet;
+bullet.Type = BodyType::Dynamic;
+bullet.CollisionDetection = CollisionDetectionMode::Continuous;
+// configure mass/state, create body, then attach any finite convex collider
+```
+
+This is deliberately conservative for boxes/capsules/hulls: their enclosing sweep
+sphere can stop slightly early, but it cannot miss a translation-only tunnel that
+the bound covers. Angular swept-volume CCD remains a future refinement.
+
 `SweepSphere` is the continuous-query bridge for fast gameplay objects. It
 accelerates candidates through the same dynamic AABB tree, includes planes, and
 then performs exact shape-distance advancement:
@@ -373,7 +390,6 @@ Still deferred:
 
 ```text
 Dynamic/kinematic concave triangle-mesh bodies (static triangle meshes are implemented)
-Continuous dynamic rigid-body CCD beyond query/projectile sweeps
 Island solver and parallel island dispatch
 Joints and articulated constraints
 Serialization/replay file format
@@ -386,7 +402,7 @@ Those belong to later engine phases, not `KairoPhysicsMath`.
 
 The rigid body engine now has convex hull validation, GJK/EPA, filtering,
 response, query, callback surfaces, and persistent multi-point warm-started contact manifolds.
-Near-term rigid-body work should add general CCD, joints, and island solving before larger
+Near-term rigid-body work should add joints and island solving before larger
 physics families are added. Those families should be separate modules that reuse the same
 world/query/event conventions:
 

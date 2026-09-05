@@ -1,5 +1,6 @@
 module;
 
+#include <cstdint>
 #include <stdexcept>
 #include <vector>
 
@@ -13,6 +14,15 @@ export namespace kairo::foundation::physics
 {
     using namespace kairo::foundation::math;
 
+    /// Selects whether final dynamic translation is integrated discretely
+    /// or clipped against a conservative time-of-impact sweep. Discrete is
+    /// intentionally the default; Continuous is opt-in for fast movers.
+    enum class CollisionDetectionMode : std::uint8_t
+    {
+        Discrete,
+        Continuous
+    };
+
     struct RigidBodyDesc final
     {
         BodyType Type = BodyType::Static;
@@ -24,6 +34,7 @@ export namespace kairo::foundation::physics
         float AngularDamping = 0.0f;
         float MaxLinearSpeed = 1000.0f;
         float MaxAngularSpeed = 1000.0f;
+        CollisionDetectionMode CollisionDetection = CollisionDetectionMode::Discrete;
         bool AllowSleeping = true;
     };
 
@@ -41,6 +52,7 @@ export namespace kairo::foundation::physics
         float AngularDamping = 0.0f;
         float MaxLinearSpeed = 1000.0f;
         float MaxAngularSpeed = 1000.0f;
+        CollisionDetectionMode CollisionDetection = CollisionDetectionMode::Discrete;
         bool AllowSleeping = true;
         bool Sleeping = false;
         float SleepTimer = 0.0f;
@@ -159,6 +171,16 @@ export namespace kairo::foundation::physics
         RequirePositive(desc.MaxLinearSpeed, "RigidBodyDesc.MaxLinearSpeed");
         RequirePositive(desc.MaxAngularSpeed, "RigidBodyDesc.MaxAngularSpeed");
 
+        switch (desc.CollisionDetection)
+        {
+        case CollisionDetectionMode::Discrete:
+        case CollisionDetectionMode::Continuous:
+            break;
+        default:
+            throw std::invalid_argument(
+                "RigidBodyDesc.CollisionDetection contains an invalid enum value.");
+        }
+
         if (desc.Type == BodyType::Dynamic && desc.Mass.InverseMass <= 0.0f)
         {
             throw std::invalid_argument(
@@ -173,6 +195,7 @@ export namespace kairo::foundation::physics
         body.AngularDamping = desc.AngularDamping;
         body.MaxLinearSpeed = desc.MaxLinearSpeed;
         body.MaxAngularSpeed = desc.MaxAngularSpeed;
+        body.CollisionDetection = desc.CollisionDetection;
         body.AllowSleeping = desc.AllowSleeping;
         body.Sleeping = false;
         body.SleepTimer = 0.0f;
