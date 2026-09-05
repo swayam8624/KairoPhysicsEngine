@@ -164,6 +164,11 @@ export namespace kairo::foundation::physics
                 throw std::out_of_range("AddCollider failed: body id does not exist or is inactive.");
             }
 
+            if (std::holds_alternative<TriangleMeshCollider>(shape) &&
+                m_Bodies.at(body).Type != BodyType::Static)
+                throw std::invalid_argument(
+                    "TriangleMeshCollider is static-only until concave dynamic manifold support lands.");
+
             const ColliderID id =
                 static_cast<ColliderID>(m_Colliders.size());
 
@@ -1611,6 +1616,89 @@ export namespace kairo::foundation::physics
         }
 
         [[nodiscard]]
+        static bool RaycastTriangle(
+  const Vec3f& origin,
+  const Vec3f& direction,
+  const Vec3f& a,
+  const Vec3f& b,
+  const Vec3f& c,
+  bool doubleSided,
+  float maxDistance,
+  float& distance,
+  Vec3f& normal)
+        {
+  constexpr float epsilon = 1.0e-7f;
+  const Vec3f edge1 = b - a;
+  const Vec3f edge2 = c - a;
+  const Vec3f p = Cross(direction, edge2);
+  const float determinant = Dot(edge1, p);
+  if (doubleSided ? std::abs(determinant) <= epsilon
+                  : determinant <= epsilon)
+      return false;
+
+  const float inverse = 1.0f / determinant;
+  const Vec3f t = origin - a;
+  const float u = Dot(t, p) * inverse;
+  if (u < 0.0f || u > 1.0f) return false;
+  const Vec3f q = Cross(t, edge1);
+  const float v = Dot(direction, q) * inverse;
+  if (v < 0.0f || u + v > 1.0f) return false;
+  const float candidate = Dot(edge2, q) * inverse;
+  if (candidate < 0.0f || candidate > maxDistance) return false;
+
+  distance = candidate;
+  normal = SafeNormalize(Cross(edge1, edge2), -direction);
+  if (Dot(normal, direction) > 0.0f) normal = -normal;
+  return true;
+        }
+
+        [[nodiscard]]
+        static bool RaycastTriangleMesh(
+  const RigidBody& body,
+  const Collider& collider,
+  const TriangleMeshCollider& mesh,
+  const Vec3f& origin,
+  const Vec3f& direction,
+  float maxDistance,
+  float& distance,
+  Vec3f& normal)
+        {
+  const Vec3f center = WorldColliderCenter(body, collider);
+  const Quaternionf rotation = WorldColliderRotation(body, collider);
+  const Quaternionf inverse = rotation.Conjugate();
+  const Vec3f localOrigin = Rotate(inverse, origin - center);
+  const Vec3f localDirection = Rotate(inverse, direction);
+  const kairo::foundation::spatial::SpatialRay ray{
+      localOrigin, localDirection };
+
+  const auto result = kairo::foundation::spatial::Raycast(
+      mesh.Acceleration, ray,
+      [&](kairo::foundation::spatial::SpatialIndex triangleIndex,
+          const kairo::foundation::spatial::SpatialRay& localRay)
+          -> std::optional<kairo::foundation::spatial::SpatialRayHit>
+      {
+          if (triangleIndex >= mesh.Triangles.size()) return std::nullopt;
+          const auto& triangle = mesh.Triangles[triangleIndex];
+          float localDistance = 0.0f;
+          Vec3f localNormal = -localRay.Direction;
+          if (!RaycastTriangle(localRay.Origin, localRay.Direction,
+              mesh.Vertices[triangle[0]], mesh.Vertices[triangle[1]],
+              mesh.Vertices[triangle[2]], mesh.DoubleSided,
+              maxDistance, localDistance, localNormal))
+              return std::nullopt;
+          return kairo::foundation::spatial::SpatialRayHit{
+              {}, triangleIndex, localDistance,
+              localRay.Origin + localRay.Direction * localDistance,
+              localNormal };
+      }, maxDistance);
+
+  if (!result.Hit) return false;
+  distance = result.Closest.Distance;
+  normal = SafeNormalize(Rotate(rotation, result.Closest.Normal), -direction);
+  return true;
+        }
+
+        [[nodiscard]]
         static bool RaycastCollider(
             const RigidBody& body,
             const Collider& collider,
@@ -1691,6 +1779,12 @@ export namespace kairo::foundation::physics
             {
                 intersects = RaycastConvexHull(
                     body, collider, *hull, origin, direction,
+                    maxDistance, distance, normal);
+            }
+            else if (const auto* mesh = std::get_if<TriangleMeshCollider>(&collider.Shape))
+            {
+                intersects = RaycastTriangleMesh(
+                    body, collider, *mesh, origin, direction,
                     maxDistance, distance, normal);
             }
 
@@ -1775,6 +1869,75 @@ export namespace kairo::foundation::physics
         }
 
         [[nodiscard]]
+        static std::optional<PhysicsSweepHit> SweepSphereTriangleMesh(
+  const RigidBody& body,
+  const Collider& collider,
+  const TriangleMeshCollider& mesh,
+  const Vec3f& start,
+  const Vec3f& displacement,
+  float radius)
+        {
+  const float travelDistance = displacement.Length();
+  const Quaternionf rotation = WorldColliderRotation(body, collider);
+  const Quaternionf inverse = rotation.Conjugate();
+  const Vec3f worldCenter = WorldColliderCenter(body, collider);
+  const Vec3f localStart = Rotate(inverse, start - worldCenter);
+  const Vec3f localDisplacement = Rotate(inverse, displacement);
+  const Vec3f localEnd = localStart + localDisplacement;
+  const Vec3f extent{ radius, radius, radius };
+  const AABBf swept = AABBf::FromMinMax(
+      Min(localStart, localEnd) - extent,
+      Max(localStart, localEnd) + extent);
+  const auto candidates =
+      kairo::foundation::spatial::QueryAABB(mesh.Acceleration, swept);
+
+  std::optional<PhysicsSweepHit> closest;
+  constexpr float tolerance = 1.0e-4f;
+  for (const auto triangleIndex : candidates.PrimitiveIndices)
+  {
+      if (triangleIndex >= mesh.Triangles.size()) continue;
+      const auto& triangle = mesh.Triangles[triangleIndex];
+      const Vec3f a = mesh.Vertices[triangle[0]];
+      const Vec3f b = mesh.Vertices[triangle[1]];
+      const Vec3f c = mesh.Vertices[triangle[2]];
+      float time = 0.0f;
+      for (int iteration = 0; iteration < 48; ++iteration)
+      {
+          const Vec3f sphereCenter = localStart + localDisplacement * time;
+          const Vec3f trianglePoint =
+              ClosestPointOnConvexTriangle(sphereCenter, a, b, c);
+          const Vec3f delta = sphereCenter - trianglePoint;
+          const float pointDistance = delta.Length();
+          const float separation = pointDistance - radius;
+          Vec3f localNormal = pointDistance > 1.0e-6f
+              ? delta / pointDistance
+              : SafeNormalize(Cross(b - a, c - a), -localDisplacement);
+          if (Dot(localNormal, localDisplacement) > 0.0f)
+              localNormal = -localNormal;
+
+          if (separation <= tolerance)
+          {
+              const Vec3f worldNormal = SafeNormalize(
+                  Rotate(rotation, localNormal), -displacement);
+              const Vec3f worldSphereCenter = start + displacement * time;
+              PhysicsSweepHit hit{
+                  body.ID, collider.ID,
+                  worldSphereCenter - worldNormal * radius,
+                  worldNormal, time * travelDistance, time,
+                  collider.IsTrigger };
+              if (!closest || hit.Distance < closest->Distance)
+                  closest = hit;
+              break;
+          }
+
+          time += separation / travelDistance;
+          if (time > 1.0f) break;
+      }
+  }
+  return closest;
+        }
+
+        [[nodiscard]]
         static std::optional<PhysicsSweepHit> SweepSphereCollider(
             const RigidBody& body,
             const Collider& collider,
@@ -1782,6 +1945,10 @@ export namespace kairo::foundation::physics
             const Vec3f& displacement,
             float radius)
         {
+            if (const auto* mesh = std::get_if<TriangleMeshCollider>(&collider.Shape))
+                return SweepSphereTriangleMesh(
+                    body, collider, *mesh, start, displacement, radius);
+
             const float travelDistance = displacement.Length();
             const Vec3f direction = displacement / travelDistance;
             float time = 0.0f;

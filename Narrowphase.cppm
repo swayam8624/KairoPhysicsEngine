@@ -12,6 +12,7 @@ export module Kairo.Foundation.PhysicsEngine.Narrowphase;
 
 import Kairo.Foundation.Math.Vector;
 import Kairo.Foundation.Geometry.Plane;
+import Kairo.Foundation.Spatial.BVHTraversal;
 import Kairo.Foundation.PhysicsMath;
 import Kairo.Foundation.PhysicsEngine.RigidBody;
 import Kairo.Foundation.PhysicsEngine.Collider;
@@ -397,6 +398,96 @@ export namespace kairo::foundation::physics
         return true;
     }
 
+    [[nodiscard]]
+    inline AABBf WorldBoundsToColliderLocal(
+        const RigidBody& body,
+        const Collider& collider,
+        const AABBf& worldBounds)
+    {
+        const Vec3f center = WorldColliderCenter(body, collider);
+        const Quaternionf inverse = WorldColliderRotation(body, collider).Conjugate();
+        AABBf local = AABBf::Empty();
+        for (std::uint32_t mask = 0u; mask < 8u; ++mask)
+        {
+  const Vec3f corner
+  {
+      (mask & 1u) != 0u ? worldBounds.Max.x : worldBounds.Min.x,
+      (mask & 2u) != 0u ? worldBounds.Max.y : worldBounds.Min.y,
+      (mask & 4u) != 0u ? worldBounds.Max.z : worldBounds.Min.z
+  };
+  local.ExpandToInclude(Rotate(inverse, corner - center));
+        }
+        return local;
+    }
+
+    [[nodiscard]]
+    inline ConvexHullCollider MakeTriangleCollisionPrism(
+        const TriangleMeshCollider& mesh,
+        std::size_t triangleIndex)
+    {
+        const auto& triangle = mesh.Triangles.at(triangleIndex);
+        const Vec3f a = mesh.Vertices.at(triangle[0]);
+        const Vec3f b = mesh.Vertices.at(triangle[1]);
+        const Vec3f c = mesh.Vertices.at(triangle[2]);
+        const Vec3f normal = SafeNormalize(Cross(b - a, c - a), Vec3f::Up());
+        const Vec3f offset = normal * (mesh.SurfaceThickness * 0.5f);
+        return {
+  { a + offset, b + offset, c + offset,
+    a - offset, b - offset, c - offset },
+  {
+      { 0u, 1u, 2u }, { 3u, 5u, 4u },
+      { 0u, 3u, 4u }, { 0u, 4u, 1u },
+      { 1u, 4u, 5u }, { 1u, 5u, 2u },
+      { 2u, 5u, 3u }, { 2u, 3u, 0u }
+  }
+        };
+    }
+
+    [[nodiscard]]
+    inline bool IsTriangleMeshConvexPeer(const Collider& collider) noexcept
+    {
+        return !std::holds_alternative<PlaneCollider>(collider.Shape) &&
+  !std::holds_alternative<TriangleMeshCollider>(collider.Shape);
+    }
+
+    [[nodiscard]]
+    inline std::optional<ContactManifold> CollideTriangleMesh(
+        const RigidBody& meshBody,
+        const Collider& meshCollider,
+        const TriangleMeshCollider& mesh,
+        const RigidBody& otherBody,
+        const Collider& otherCollider)
+    {
+        if (!IsTriangleMeshConvexPeer(otherCollider)) return std::nullopt;
+
+        const AABBf otherBounds = WorldAABB(otherBody, otherCollider);
+        if (!otherBounds.IsValid()) return std::nullopt;
+        const AABBf localQuery =
+  WorldBoundsToColliderLocal(meshBody, meshCollider, otherBounds);
+        const auto candidates = kairo::foundation::spatial::QueryAABB(
+  mesh.Acceleration, localQuery);
+
+        std::optional<ConvexPenetration> deepest;
+        for (const auto triangleIndex : candidates.PrimitiveIndices)
+        {
+  if (triangleIndex >= mesh.Triangles.size()) continue;
+  Collider prism = meshCollider;
+  prism.Shape = MakeTriangleCollisionPrism(mesh, triangleIndex);
+  const auto penetration =
+      CollideConvex(meshBody, prism, otherBody, otherCollider);
+  if (penetration && (!deepest || penetration->Depth > deepest->Depth))
+      deepest = penetration;
+        }
+
+        if (!deepest) return std::nullopt;
+        ContactManifold manifold = MakeContactManifold(
+  meshBody.ID, otherBody.ID, meshCollider.ID, otherCollider.ID,
+  meshCollider.IsTrigger || otherCollider.IsTrigger);
+        manifold.Points.push_back(MakeContactPoint(
+  deepest->Position, deepest->Normal, deepest->Depth));
+        return manifold;
+    }
+
     /// Input: two colliders and their owning bodies.
     /// Output: contact manifold when the shapes overlap.
     /// Task: perform exact V1 collision tests after broadphase candidate pairing.
@@ -428,6 +519,27 @@ export namespace kairo::foundation::physics
 
         const Vec3f centerB =
             WorldColliderCenter(bodyB, colliderB);
+
+        if (const auto* meshA = std::get_if<TriangleMeshCollider>(&colliderA.Shape))
+        {
+            return CollideTriangleMesh(
+                bodyA, colliderA, *meshA, bodyB, colliderB);
+        }
+
+        if (std::holds_alternative<TriangleMeshCollider>(colliderB.Shape))
+        {
+            const auto swapped = CollidePair(bodyB, colliderB, bodyA, colliderA);
+            if (!swapped) return std::nullopt;
+            ContactManifold result = MakeContactManifold(
+                bodyA.ID, bodyB.ID, colliderA.ID, colliderB.ID,
+                colliderA.IsTrigger || colliderB.IsTrigger);
+            for (ContactPoint point : swapped->Points)
+            {
+                point.Normal = -point.Normal;
+                result.Points.push_back(point);
+            }
+            return result;
+        }
 
         if (std::holds_alternative<ConvexHullCollider>(colliderA.Shape))
         {

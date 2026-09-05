@@ -110,9 +110,10 @@ Current engine surface:
 Stable vector-index body/collider ids with inactive deletion-safe records
 Dynamic, static, and kinematic body behavior
 Per-body gravity scale, damping, max velocity clamps, sleeping, and wake hooks
-Sphere, plane, AABB, oriented box, and validated convex-hull shapes
+Sphere, plane, AABB, oriented box, validated convex-hull, and static triangle-mesh shapes
 CapsuleCollider with sphere/capsule/plane/AABB/oriented-box contacts
 GJK intersection and EPA penetration for convex hulls against finite convex shapes
+Static triangle meshes with KairoSpatial SAH BVH acceleration, exact rays/sweeps, and convex contact generation
 Exact convex-hull plane contacts, raycasts, sphere sweeps, bounds, and debug topology
 Collider local center and local rotation
 BelongsTo / CollidesWith collision filters
@@ -371,7 +372,7 @@ world.Step(dt);
 Still deferred:
 
 ```text
-Static/dynamic triangle-mesh colliders and mesh acceleration
+Dynamic/kinematic concave triangle-mesh bodies (static triangle meshes are implemented)
 Continuous dynamic rigid-body CCD beyond query/projectile sweeps
 Island solver and parallel island dispatch
 Joints and articulated constraints
@@ -386,7 +387,7 @@ Those belong to later engine phases, not `KairoPhysicsMath`.
 
 The rigid body engine now has convex hull validation, GJK/EPA, filtering,
 response, query, and callback surfaces. Near-term rigid-body work should add
-triangle-mesh collision, persistent multi-point manifolds, general CCD, joints,
+dynamic triangle-mesh motion, persistent multi-point manifolds, general CCD, joints,
 and island solving before larger physics families are added. Those families
 should be separate modules that reuse the same world/query/event conventions:
 
