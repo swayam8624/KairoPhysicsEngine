@@ -1,0 +1,41 @@
+name: Agent Triangle Mesh Query Test Fix V2
+on:
+  push:
+    branches:
+      - complete/triangle-mesh-collision
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: complete/triangle-mesh-collision
+          fetch-depth: 0
+      - name: Patch query regression
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tests/PhysicsEngineTests.cpp')
+          s = p.read_text()
+          ray_old = """    const auto ray = world.Raycast(\n        Vec3f{ 0.0f, 2.0f, 0.0f }, -Vec3f::UnitY(), 10.0f);"""
+          ray_new = """    const auto ray = world.Raycast(\n        Vec3f{ 0.0f, 2.0f, 0.0f }, -Vec3f::UnitY(), 10.0f,\n        0xFFFF'FFFFu, sphere);"""
+          sweep_old = """    const auto sweep = world.SweepSphere(\n        Vec3f{ 0.0f, 2.0f, 0.0f }, Vec3f{ 0.0f, -3.0f, 0.0f }, 0.25f);"""
+          sweep_new = """    const auto sweep = world.SweepSphere(\n        Vec3f{ 0.0f, 2.0f, 0.0f }, Vec3f{ 0.0f, -3.0f, 0.0f }, 0.25f,\n        0xFFFF'FFFFu, sphere);"""
+          if ray_old not in s or sweep_old not in s:
+              raise SystemExit('expected regression snippets not found')
+          s = s.replace(ray_old, ray_new, 1).replace(sweep_old, sweep_new, 1)
+          p.write_text(s)
+          PY
+      - name: Commit and remove helpers
+        shell: bash
+        run: |
+          rm -f .github/workflows/agent_triangle_mesh_query_test_fix.yml
+          rm -f .github/workflows/agent_triangle_mesh_query_test_fix_v2.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Fix triangle mesh query regression isolation'
+          git push origin HEAD:complete/triangle-mesh-collision
