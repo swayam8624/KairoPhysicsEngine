@@ -111,35 +111,8 @@ export namespace kairo::foundation::physics::sandbox
             }
         }
 
-        std::vector<std::size_t> parent(world.Bodies().size());
-        std::iota(parent.begin(), parent.end(), std::size_t{ 0 });
-
-        for (const ContactManifold& contact : world.Contacts())
-        {
-            if (contact.BodyA < parent.size() && contact.BodyB < parent.size())
-            {
-                Union(parent, contact.BodyA, contact.BodyB);
-            }
-        }
-
-        std::vector<std::size_t> roots;
-        for (const RigidBody& body : world.Bodies())
-        {
-            if (!IsActiveBody(body) || !IsDynamicBodyType(body))
-            {
-                continue;
-            }
-
-            const std::size_t root =
-                FindRoot(parent, body.ID);
-
-            if (std::find(roots.begin(), roots.end(), root) == roots.end())
-            {
-                roots.push_back(root);
-            }
-        }
-
-        stats.Islands = roots.size();
+        stats.Islands =
+            BuildSolverIslands(world.Bodies(), world.Contacts(), world.Joints()).size();
 
         const PhysicsStepProfile& profile =
             world.LastStepProfile();

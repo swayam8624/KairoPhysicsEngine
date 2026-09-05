@@ -8,6 +8,8 @@ export import Kairo.Foundation.PhysicsEngine.Broadphase;
 export import Kairo.Foundation.PhysicsEngine.ConvexCollision;
 export import Kairo.Foundation.PhysicsEngine.Narrowphase;
 export import Kairo.Foundation.PhysicsEngine.ContactSolver;
+export import Kairo.Foundation.PhysicsEngine.Joint;
+export import Kairo.Foundation.PhysicsEngine.SolverIsland;
 export import Kairo.Foundation.PhysicsEngine.Debug;
 export import Kairo.Foundation.PhysicsEngine.World;
 export import Kairo.Foundation.PhysicsEngine.Projectile;

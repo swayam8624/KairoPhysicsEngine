@@ -86,6 +86,169 @@ namespace
 
 
 
+
+TEST_CASE("Distance joints preserve authored separation",
+    "[PhysicsEngine][Joint][Distance]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+    const BodyID anchor = world.CreateRigidBody(StaticBody());
+    RigidBodyDesc dynamic = DynamicSphereBody(Vec3f{ 2.0f, 0.0f, 0.0f }, 0.25f);
+    dynamic.State.LinearVelocity = Vec3f{ -8.0f, 3.0f, 0.0f };
+    const BodyID bob = world.CreateRigidBody(dynamic);
+    const JointID joint = world.CreateDistanceJoint(
+        anchor, bob, Vec3f::Zero(), Vec3f{ 2.0f, 0.0f, 0.0f }, 2.0f);
+    REQUIRE(world.IsValidJoint(joint));
+
+    for (int i = 0; i < 180; ++i)
+    {
+        world.Step(1.0f / 120.0f);
+    }
+
+    CHECK(world.Bodies().at(bob).State.Position.Length() ==
+        Catch::Approx(2.0f).margin(0.04f));
+}
+
+TEST_CASE("Ball socket joints keep a shared anchor coincident",
+    "[PhysicsEngine][Joint][BallSocket]")
+{
+    PhysicsWorld world;
+    world.Settings.EnableSleeping = false;
+    const BodyID anchor = world.CreateRigidBody(StaticBody());
+    const BodyID bob = world.CreateRigidBody(
+        DynamicSphereBody(Vec3f{ 0.0f, -1.0f, 0.0f }, 0.25f));
+    const JointID id = world.CreateBallSocketJoint(anchor, bob, Vec3f::Zero());
+
+    for (int i = 0; i < 180; ++i)
+    {
+        world.Step(1.0f / 120.0f);
+    }
+
+    const auto& joint = std::get<BallSocketJoint>(world.Joints().at(id).Constraint);
+    const Vec3f a = WorldJointAnchor(world.Bodies().at(anchor), joint.LocalAnchorA);
+    const Vec3f b = WorldJointAnchor(world.Bodies().at(bob), joint.LocalAnchorB);
+    CHECK((b - a).Length() < 0.04f);
+}
+
+TEST_CASE("Fixed joints preserve relative pose under authored velocity",
+    "[PhysicsEngine][Joint][Fixed]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+    const BodyID anchor = world.CreateRigidBody(StaticBody());
+    RigidBodyDesc moving = DynamicBoxBody(Vec3f{ 1.0f, 0.0f, 0.0f });
+    moving.State.LinearVelocity = Vec3f{ 5.0f, 2.0f, 0.0f };
+    moving.State.AngularVelocity = Vec3f{ 2.0f, 3.0f, 4.0f };
+    const BodyID body = world.CreateRigidBody(moving);
+    [[maybe_unused]] const JointID id =
+        world.CreateFixedJoint(anchor, body, Vec3f{ 1.0f, 0.0f, 0.0f });
+
+    for (int i = 0; i < 120; ++i)
+    {
+        world.Step(1.0f / 120.0f);
+    }
+
+    CHECK((world.Bodies().at(body).State.Position - Vec3f{ 1.0f, 0.0f, 0.0f }).Length() < 0.05f);
+    const Quaternionf rotation = world.Bodies().at(body).State.Rotation;
+    CHECK(std::abs(rotation.x) < 0.04f);
+    CHECK(std::abs(rotation.y) < 0.04f);
+    CHECK(std::abs(rotation.z) < 0.04f);
+}
+
+TEST_CASE("Hinge joints preserve the free axis while constraining orthogonal spin",
+    "[PhysicsEngine][Joint][Hinge]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+    const BodyID anchor = world.CreateRigidBody(StaticBody());
+    RigidBodyDesc moving = DynamicBoxBody(Vec3f::Zero());
+    moving.State.AngularVelocity = Vec3f{ 5.0f, 5.0f, 0.0f };
+    const BodyID body = world.CreateRigidBody(moving);
+    [[maybe_unused]] const JointID id =
+        world.CreateHingeJoint(anchor, body, Vec3f::Zero(), Vec3f::UnitY());
+
+    for (int i = 0; i < 30; ++i)
+    {
+        world.Step(1.0f / 120.0f);
+    }
+
+    CHECK(std::abs(world.Bodies().at(body).State.AngularVelocity.x) < 0.5f);
+    CHECK(std::abs(world.Bodies().at(body).State.AngularVelocity.z) < 0.5f);
+    CHECK(std::abs(world.Bodies().at(body).State.AngularVelocity.y) > 1.0f);
+}
+
+TEST_CASE("Solver islands ignore static bridges and merge through dynamic joints",
+    "[PhysicsEngine][Island]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+    const BodyID staticAnchor = world.CreateRigidBody(StaticBody());
+    const BodyID a = world.CreateRigidBody(
+        DynamicSphereBody(Vec3f{ -2.0f, 0.0f, 0.0f }, 0.25f));
+    const BodyID b = world.CreateRigidBody(
+        DynamicSphereBody(Vec3f{ 2.0f, 0.0f, 0.0f }, 0.25f));
+
+    [[maybe_unused]] const JointID aJoint = world.CreateDistanceJoint(
+        staticAnchor, a, Vec3f::Zero(), Vec3f{ -2.0f, 0.0f, 0.0f }, 2.0f);
+    [[maybe_unused]] const JointID bJoint = world.CreateDistanceJoint(
+        staticAnchor, b, Vec3f::Zero(), Vec3f{ 2.0f, 0.0f, 0.0f }, 2.0f);
+    world.Step(1.0f / 60.0f);
+    REQUIRE(world.SolverIslands().size() == 2u);
+
+    [[maybe_unused]] const JointID bridge = world.CreateDistanceJoint(
+        a, b,
+        world.Bodies().at(a).State.Position,
+        world.Bodies().at(b).State.Position,
+        4.0f);
+    world.Step(1.0f / 60.0f);
+    CHECK(world.SolverIslands().size() == 1u);
+}
+
+TEST_CASE("Parallel island dispatch matches serial island results",
+    "[PhysicsEngine][Island][Parallel]")
+{
+    auto configure = [](PhysicsWorld& world)
+    {
+        world.Gravity = Vec3f::Zero();
+        world.Settings.EnableSleeping = false;
+        world.Settings.ParallelIslandMinCount = 2;
+        const BodyID anchor = world.CreateRigidBody(StaticBody());
+        for (int i = 0; i < 4; ++i)
+        {
+            const float x = -3.0f + static_cast<float>(i) * 2.0f;
+            RigidBodyDesc desc = DynamicSphereBody(Vec3f{ x, 0.0f, 0.0f }, 0.2f);
+            desc.State.LinearVelocity = Vec3f{ 0.5f * static_cast<float>(i + 1), 1.0f, 0.0f };
+            const BodyID body = world.CreateRigidBody(desc);
+            [[maybe_unused]] const JointID joint = world.CreateDistanceJoint(
+                anchor, body, Vec3f::Zero(), Vec3f{ x, 0.0f, 0.0f }, std::abs(x));
+        }
+    };
+
+    PhysicsWorld serial;
+    PhysicsWorld parallel;
+    configure(serial);
+    configure(parallel);
+    serial.Settings.EnableParallelIslands = false;
+    parallel.Settings.EnableParallelIslands = true;
+
+    for (int step = 0; step < 90; ++step)
+    {
+        serial.Step(1.0f / 120.0f);
+        parallel.Step(1.0f / 120.0f);
+    }
+
+    REQUIRE(serial.Bodies().size() == parallel.Bodies().size());
+    for (std::size_t i = 0; i < serial.Bodies().size(); ++i)
+    {
+        CHECK((serial.Bodies()[i].State.Position - parallel.Bodies()[i].State.Position).Length() < 1.0e-4f);
+        CHECK((serial.Bodies()[i].State.LinearVelocity - parallel.Bodies()[i].State.LinearVelocity).Length() < 1.0e-4f);
+    }
+}
+
 TEST_CASE("Continuous sphere rigid body does not tunnel through a plane",
     "[PhysicsEngine][CCD]")
 {
