@@ -494,6 +494,29 @@ export namespace kairo::foundation::physics
             WakeRigidBody(m_Bodies.at(body));
         }
 
+        /// Input: active body id and desired collision-detection mode.
+        /// Output: body integration policy updated for subsequent steps.
+        /// Task: opt fast dynamic bodies into conservative rigid-body CCD while
+        /// preserving discrete integration as the inexpensive default.
+        void SetBodyCollisionDetectionMode(
+            BodyID body,
+            CollisionDetectionMode mode)
+        {
+            RigidBody& record =
+                RequireMutableBody(body, "SetBodyCollisionDetectionMode");
+
+            switch (mode)
+            {
+            case CollisionDetectionMode::Discrete:
+            case CollisionDetectionMode::Continuous:
+                record.CollisionDetection = mode;
+                return;
+            }
+
+            throw std::invalid_argument(
+                "SetBodyCollisionDetectionMode failed: invalid collision detection mode.");
+        }
+
         void AddBodyForce(
             BodyID body,
             const Vec3f& force)
@@ -613,7 +636,7 @@ export namespace kairo::foundation::physics
             const auto solverEnd =
                 std::chrono::steady_clock::now();
 
-            IntegrateDynamicVelocities(dt);
+            IntegrateDynamicVelocitiesWithCCD(dt);
             UpdateSleeping(dt);
             ClearForceAccumulators();
 
@@ -2029,9 +2052,227 @@ export namespace kairo::foundation::physics
             }
         }
 
-        void IntegrateDynamicVelocities(
+        struct ContinuousImpact final
+        {
+            BodyID BodyA = InvalidBodyID;
+            BodyID BodyB = InvalidBodyID;
+            ColliderID ColliderA = InvalidColliderID;
+            ColliderID ColliderB = InvalidColliderID;
+            Vec3f NormalAtoB = Vec3f::UnitX();
+            float TimeOfImpact = 1.0f;
+        };
+
+        [[nodiscard]]
+        static float ColliderSweepRadius(
+            const Collider& collider)
+        {
+            if (const auto* sphere = std::get_if<SphereCollider>(&collider.Shape))
+            {
+                return sphere->Radius;
+            }
+            if (const auto* capsule = std::get_if<CapsuleCollider>(&collider.Shape))
+            {
+                return capsule->HalfHeight + capsule->Radius;
+            }
+            if (const auto* box = std::get_if<AABBCollider>(&collider.Shape))
+            {
+                return box->HalfExtents.Length();
+            }
+            if (const auto* box = std::get_if<BoxCollider>(&collider.Shape))
+            {
+                return box->HalfExtents.Length();
+            }
+            if (const auto* hull = std::get_if<ConvexHullCollider>(&collider.Shape))
+            {
+                float radius = 0.0f;
+                for (const Vec3f& vertex : hull->Vertices)
+                {
+                    radius = std::max(radius, vertex.Length());
+                }
+                return radius;
+            }
+
+            // Infinite planes cannot be swept as moving source volumes and
+            // triangle meshes are intentionally static-only in this engine.
+            return 0.0f;
+        }
+
+        void ApplyContinuousImpactImpulse(
+            const ContinuousImpact& impact)
+        {
+            if (impact.BodyA >= m_Bodies.size() ||
+                impact.BodyB >= m_Bodies.size() ||
+                impact.ColliderA >= m_Colliders.size() ||
+                impact.ColliderB >= m_Colliders.size())
+            {
+                return;
+            }
+
+            RigidBody& bodyA = m_Bodies.at(impact.BodyA);
+            RigidBody& bodyB = m_Bodies.at(impact.BodyB);
+            if (!IsActiveBody(bodyA) || !IsActiveBody(bodyB))
+            {
+                return;
+            }
+
+            const float inverseMassA =
+                IsDynamicBodyType(bodyA) ? bodyA.Mass.InverseMass : 0.0f;
+            const float inverseMassB =
+                IsDynamicBodyType(bodyB) ? bodyB.Mass.InverseMass : 0.0f;
+            const float inverseMassSum = inverseMassA + inverseMassB;
+            if (inverseMassSum <= 0.0f)
+            {
+                return;
+            }
+
+            const Vec3f normal =
+                SafeNormalize(impact.NormalAtoB, Vec3f::UnitX());
+            const float relativeNormalVelocity =
+                Dot(bodyB.State.LinearVelocity - bodyA.State.LinearVelocity, normal);
+            if (relativeNormalVelocity >= 0.0f)
+            {
+                return;
+            }
+
+            const Collider& colliderA = m_Colliders.at(impact.ColliderA);
+            const Collider& colliderB = m_Colliders.at(impact.ColliderB);
+            const float restitution = MixRestitution(colliderA.Material, colliderB.Material);
+            const float impulseMagnitude =
+                -(1.0f + restitution) * relativeNormalVelocity / inverseMassSum;
+            const Vec3f impulse = normal * impulseMagnitude;
+
+            if (inverseMassA > 0.0f)
+            {
+                WakeRigidBody(bodyA);
+                bodyA.State.LinearVelocity -= impulse * inverseMassA;
+            }
+            if (inverseMassB > 0.0f)
+            {
+                WakeRigidBody(bodyB);
+                bodyB.State.LinearVelocity += impulse * inverseMassB;
+            }
+        }
+
+        void IntegrateDynamicVelocitiesWithCCD(
             float dt)
         {
+            constexpr float minimumTravelSq = 1.0e-12f;
+            constexpr float minimumTOI = 1.0e-5f;
+            constexpr float toiSafety = 1.0e-4f;
+            constexpr float impactWindow = 2.0e-3f;
+
+            std::vector<float> motionFractions(m_Bodies.size(), 1.0f);
+            std::vector<ContinuousImpact> impacts;
+
+            for (const RigidBody& movingBody : m_Bodies)
+            {
+                if (!IsDynamic(movingBody) ||
+                    movingBody.CollisionDetection != CollisionDetectionMode::Continuous)
+                {
+                    continue;
+                }
+
+                const Vec3f movingDisplacement =
+                    movingBody.State.LinearVelocity * dt;
+                if (movingDisplacement.LengthSquared() <= minimumTravelSq)
+                {
+                    continue;
+                }
+
+                for (const Collider& movingCollider : m_Colliders)
+                {
+                    if (!IsActiveCollider(movingCollider) ||
+                        movingCollider.Body != movingBody.ID ||
+                        IsInfiniteCollider(movingCollider))
+                    {
+                        continue;
+                    }
+
+                    const float radius = ColliderSweepRadius(movingCollider);
+                    if (radius <= 0.0f)
+                    {
+                        continue;
+                    }
+
+                    const Vec3f start =
+                        WorldColliderCenter(movingBody, movingCollider);
+
+                    for (const Collider& targetCollider : m_Colliders)
+                    {
+                        if (!IsActiveCollider(targetCollider) ||
+                            targetCollider.Body == movingBody.ID ||
+                            targetCollider.Body >= m_Bodies.size() ||
+                            !CollisionFiltersAllow(movingCollider, targetCollider) ||
+                            ResolveCollisionResponse(movingCollider, targetCollider) !=
+                                CollisionResponse::Block)
+                        {
+                            continue;
+                        }
+
+                        const RigidBody& targetBody =
+                            m_Bodies.at(targetCollider.Body);
+                        if (!IsActiveBody(targetBody))
+                        {
+                            continue;
+                        }
+
+                        // Dynamic targets are swept in relative translation so
+                        // two fast bodies cannot cross between their old centers.
+                        // Kinematic bodies have already advanced earlier in Step,
+                        // so their current transform is the target pose here.
+                        const Vec3f targetDisplacement =
+                            IsDynamic(targetBody)
+                                ? targetBody.State.LinearVelocity * dt
+                                : Vec3f::Zero();
+                        const Vec3f relativeDisplacement =
+                            movingDisplacement - targetDisplacement;
+                        if (relativeDisplacement.LengthSquared() <= minimumTravelSq)
+                        {
+                            continue;
+                        }
+
+                        const auto hit = SweepSphereCollider(
+                            targetBody,
+                            targetCollider,
+                            start,
+                            relativeDisplacement,
+                            radius);
+                        if (!hit ||
+                            hit->TimeOfImpact <= minimumTOI ||
+                            hit->TimeOfImpact > 1.0f ||
+                            Dot(relativeDisplacement, hit->Normal) >= -1.0e-6f)
+                        {
+                            continue;
+                        }
+
+                        const float fraction =
+                            std::max(0.0f, hit->TimeOfImpact - toiSafety);
+                        motionFractions.at(movingBody.ID) =
+                            std::min(motionFractions.at(movingBody.ID), fraction);
+                        if (IsDynamicBodyType(targetBody))
+                        {
+                            motionFractions.at(targetBody.ID) =
+                                std::min(motionFractions.at(targetBody.ID), fraction);
+                        }
+
+                        impacts.push_back(
+                            ContinuousImpact
+                            {
+                                movingBody.ID,
+                                targetBody.ID,
+                                movingCollider.ID,
+                                targetCollider.ID,
+                                -hit->Normal,
+                                hit->TimeOfImpact
+                            });
+                    }
+                }
+            }
+
+            // Integrate every dynamic body once. A discrete body can still be
+            // clipped when it is the other participant in a continuous pair;
+            // this preserves the pair's relative TOI rather than allowing the
+            // discrete participant to move through the stopped continuous body.
             for (RigidBody& body : m_Bodies)
             {
                 if (!IsDynamic(body))
@@ -2039,8 +2280,54 @@ export namespace kairo::foundation::physics
                     continue;
                 }
 
-                ApplyVelocityControls(body, dt);
-                AdvanceMotionState(body.State, dt);
+                const float fraction =
+                    body.ID < motionFractions.size()
+                        ? motionFractions.at(body.ID)
+                        : 1.0f;
+                AdvanceMotionState(body.State, dt * fraction);
+            }
+
+            std::sort(
+                impacts.begin(),
+                impacts.end(),
+                [](const ContinuousImpact& lhs, const ContinuousImpact& rhs)
+                {
+                    if (lhs.TimeOfImpact != rhs.TimeOfImpact)
+                    {
+                        return lhs.TimeOfImpact < rhs.TimeOfImpact;
+                    }
+                    if (lhs.ColliderA != rhs.ColliderA)
+                    {
+                        return lhs.ColliderA < rhs.ColliderA;
+                    }
+                    return lhs.ColliderB < rhs.ColliderB;
+                });
+
+            std::vector<BroadphasePair> resolvedPairs;
+            for (const ContinuousImpact& impact : impacts)
+            {
+                const float fractionA = motionFractions.at(impact.BodyA);
+                const float fractionB =
+                    impact.BodyB < motionFractions.size()
+                        ? motionFractions.at(impact.BodyB)
+                        : 1.0f;
+                if (impact.TimeOfImpact > fractionA + impactWindow ||
+                    (IsDynamicBodyType(m_Bodies.at(impact.BodyB)) &&
+                     impact.TimeOfImpact > fractionB + impactWindow))
+                {
+                    continue;
+                }
+
+                const BroadphasePair pair =
+                    OrderedBroadphasePair(impact.ColliderA, impact.ColliderB);
+                if (std::find(resolvedPairs.begin(), resolvedPairs.end(), pair) !=
+                    resolvedPairs.end())
+                {
+                    continue;
+                }
+
+                resolvedPairs.push_back(pair);
+                ApplyContinuousImpactImpulse(impact);
             }
         }
 
