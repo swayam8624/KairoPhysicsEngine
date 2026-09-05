@@ -997,7 +997,9 @@ export namespace kairo::foundation::physics
             BodyID BodyB = InvalidBodyID;
             ColliderID ColliderA = InvalidColliderID;
             ColliderID ColliderB = InvalidColliderID;
-            std::uint32_t PointIndex = 0;
+            Vec3f LocalAnchorA = Vec3f::Zero();
+            Vec3f LocalAnchorB = Vec3f::Zero();
+            Vec3f Normal = Vec3f::Up();
             float NormalImpulse = 0.0f;
             float TangentImpulse = 0.0f;
         };
@@ -2468,43 +2470,81 @@ export namespace kairo::foundation::physics
         }
 
         [[nodiscard]]
-        static bool SameCacheKey(
+        static bool SameCachePair(
             const ContactCacheEntry& entry,
-            const ContactManifold& manifold,
-            std::uint32_t pointIndex) noexcept
+            const ContactManifold& manifold) noexcept
         {
             return entry.BodyA == manifold.BodyA &&
                 entry.BodyB == manifold.BodyB &&
                 entry.ColliderA == manifold.ColliderA &&
-                entry.ColliderB == manifold.ColliderB &&
-                entry.PointIndex == pointIndex;
+                entry.ColliderB == manifold.ColliderB;
+        }
+
+        [[nodiscard]]
+        static Vec3f ContactAnchorInBodySpace(
+            const RigidBody& body,
+            const Vec3f& worldPoint)
+        {
+            return Rotate(
+                body.State.Rotation.Conjugate(),
+                worldPoint - body.State.Position);
         }
 
         void RestoreContactCache()
         {
+            std::vector<bool> used(m_ContactCache.size(), false);
+            constexpr float anchorMatchDistanceSq = 0.01f;
+            constexpr float minimumNormalAgreement = 0.80f;
+
             for (ContactManifold& manifold : m_LastContacts)
             {
-                for (std::size_t pointIndex = 0; pointIndex < manifold.Points.size(); ++pointIndex)
+                if (manifold.BodyA >= m_Bodies.size() ||
+                    manifold.BodyB >= m_Bodies.size())
                 {
-                    ContactPoint& point =
-                        manifold.Points.at(pointIndex);
+                    continue;
+                }
 
-                    const std::uint32_t stablePointIndex =
-                        static_cast<std::uint32_t>(pointIndex);
+                const RigidBody& bodyA = m_Bodies.at(manifold.BodyA);
+                const RigidBody& bodyB = m_Bodies.at(manifold.BodyB);
 
-                    const auto found =
-                        std::find_if(
-                            m_ContactCache.begin(),
-                            m_ContactCache.end(),
-                            [&manifold, stablePointIndex](const ContactCacheEntry& entry)
-                            {
-                                return SameCacheKey(entry, manifold, stablePointIndex);
-                            });
+                for (ContactPoint& point : manifold.Points)
+                {
+                    const Vec3f localAnchorA = ContactAnchorInBodySpace(bodyA, point.Position);
+                    const Vec3f localAnchorB = ContactAnchorInBodySpace(bodyB, point.Position);
+                    const Vec3f normal = SafeNormalize(point.Normal, Vec3f::Up());
 
-                    if (found != m_ContactCache.end())
+                    std::size_t best = m_ContactCache.size();
+                    float bestError = std::numeric_limits<float>::max();
+                    for (std::size_t index = 0u; index < m_ContactCache.size(); ++index)
                     {
-                        point.NormalImpulse = found->NormalImpulse;
-                        point.TangentImpulse = found->TangentImpulse;
+                        if (used[index]) continue;
+                        const ContactCacheEntry& entry = m_ContactCache[index];
+                        if (!SameCachePair(entry, manifold) ||
+                            Dot(normal, entry.Normal) < minimumNormalAgreement)
+                        {
+                            continue;
+                        }
+
+                        const float errorA = (localAnchorA - entry.LocalAnchorA).LengthSquared();
+                        const float errorB = (localAnchorB - entry.LocalAnchorB).LengthSquared();
+                        if (errorA > anchorMatchDistanceSq || errorB > anchorMatchDistanceSq)
+                        {
+                            continue;
+                        }
+
+                        const float totalError = errorA + errorB;
+                        if (totalError < bestError)
+                        {
+                            bestError = totalError;
+                            best = index;
+                        }
+                    }
+
+                    if (best != m_ContactCache.size())
+                    {
+                        point.NormalImpulse = m_ContactCache[best].NormalImpulse;
+                        point.TangentImpulse = m_ContactCache[best].TangentImpulse;
+                        used[best] = true;
                     }
                 }
             }
@@ -2513,19 +2553,19 @@ export namespace kairo::foundation::physics
         void StoreContactCache()
         {
             m_ContactCache.clear();
-
             for (const ContactManifold& manifold : m_LastContacts)
             {
-                if (manifold.IsTrigger)
+                if (manifold.IsTrigger ||
+                    manifold.BodyA >= m_Bodies.size() ||
+                    manifold.BodyB >= m_Bodies.size())
                 {
                     continue;
                 }
 
-                for (std::size_t pointIndex = 0; pointIndex < manifold.Points.size(); ++pointIndex)
+                const RigidBody& bodyA = m_Bodies.at(manifold.BodyA);
+                const RigidBody& bodyB = m_Bodies.at(manifold.BodyB);
+                for (const ContactPoint& point : manifold.Points)
                 {
-                    const ContactPoint& point =
-                        manifold.Points.at(pointIndex);
-
                     if (point.NormalImpulse <= 0.0f &&
                         std::abs(point.TangentImpulse) <= 1.0e-8f)
                     {
@@ -2539,35 +2579,35 @@ export namespace kairo::foundation::physics
                             manifold.BodyB,
                             manifold.ColliderA,
                             manifold.ColliderB,
-                            static_cast<std::uint32_t>(pointIndex),
+                            ContactAnchorInBodySpace(bodyA, point.Position),
+                            ContactAnchorInBodySpace(bodyB, point.Position),
+                            SafeNormalize(point.Normal, Vec3f::Up()),
                             point.NormalImpulse,
                             point.TangentImpulse
                         });
                 }
             }
 
+            const auto lessVec3 =
+                [](const Vec3f& lhs, const Vec3f& rhs) noexcept
+                {
+                    if (lhs.x != rhs.x) return lhs.x < rhs.x;
+                    if (lhs.y != rhs.y) return lhs.y < rhs.y;
+                    return lhs.z < rhs.z;
+                };
+
             std::sort(
                 m_ContactCache.begin(),
                 m_ContactCache.end(),
-                [](const ContactCacheEntry& lhs, const ContactCacheEntry& rhs)
+                [&lessVec3](const ContactCacheEntry& lhs, const ContactCacheEntry& rhs)
                 {
-                    if (lhs.BodyA != rhs.BodyA)
-                    {
-                        return lhs.BodyA < rhs.BodyA;
-                    }
-                    if (lhs.BodyB != rhs.BodyB)
-                    {
-                        return lhs.BodyB < rhs.BodyB;
-                    }
-                    if (lhs.ColliderA != rhs.ColliderA)
-                    {
-                        return lhs.ColliderA < rhs.ColliderA;
-                    }
-                    if (lhs.ColliderB != rhs.ColliderB)
-                    {
-                        return lhs.ColliderB < rhs.ColliderB;
-                    }
-                    return lhs.PointIndex < rhs.PointIndex;
+                    if (lhs.BodyA != rhs.BodyA) return lhs.BodyA < rhs.BodyA;
+                    if (lhs.BodyB != rhs.BodyB) return lhs.BodyB < rhs.BodyB;
+                    if (lhs.ColliderA != rhs.ColliderA) return lhs.ColliderA < rhs.ColliderA;
+                    if (lhs.ColliderB != rhs.ColliderB) return lhs.ColliderB < rhs.ColliderB;
+                    if (lessVec3(lhs.LocalAnchorA, rhs.LocalAnchorA)) return true;
+                    if (lessVec3(rhs.LocalAnchorA, lhs.LocalAnchorA)) return false;
+                    return lessVec3(lhs.LocalAnchorB, rhs.LocalAnchorB);
                 });
         }
     };

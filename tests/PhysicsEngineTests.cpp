@@ -85,6 +85,83 @@ namespace
 }
 
 
+TEST_CASE("Box plane contact produces a stable four-point face manifold",
+    "[PhysicsEngine][Manifold][Box][Plane]")
+{
+    const RigidBody boxBody =
+        MakeRigidBody(0, DynamicBoxBody(Vec3f{ 0.0f, 0.45f, 0.0f }));
+    const RigidBody planeBody = MakeRigidBody(1, StaticBody());
+    const Collider box =
+        MakeCollider(0, 0, BoxCollider{ Vec3f{ 0.5f, 0.5f, 0.5f } });
+    const Collider plane =
+        MakeCollider(1, 1, PlaneCollider{ Vec3f::Up(), 0.0f });
+
+    const auto contact = CollidePair(boxBody, box, planeBody, plane);
+    REQUIRE(contact.has_value());
+    REQUIRE(contact->Points.size() == 4u);
+    for (const ContactPoint& point : contact->Points)
+    {
+        CHECK(point.Normal.y < -0.99f);
+        CHECK(point.PenetrationDepth == Catch::Approx(0.05f).margin(1.0e-4f));
+    }
+}
+
+TEST_CASE("Oriented box and AABB use the shared SAT manifold path",
+    "[PhysicsEngine][Manifold][Box][AABB]")
+{
+    RigidBodyDesc orientedDesc = DynamicBoxBody(Vec3f::Zero());
+    orientedDesc.State.Rotation = RotationAroundZ(0.15f);
+    const RigidBody orientedBody = MakeRigidBody(0, orientedDesc);
+    const RigidBody axisBody =
+        MakeRigidBody(1, StaticBody(Vec3f{ 0.80f, 0.0f, 0.0f }));
+    const Collider oriented =
+        MakeCollider(0, 0, BoxCollider{ Vec3f{ 0.5f, 0.5f, 0.5f } });
+    const Collider axis =
+        MakeCollider(1, 1, AABBCollider{ Vec3f{ 0.5f, 0.5f, 0.5f } });
+
+    const auto forward = CollidePair(orientedBody, oriented, axisBody, axis);
+    const auto reverse = CollidePair(axisBody, axis, orientedBody, oriented);
+    REQUIRE(forward.has_value());
+    REQUIRE(reverse.has_value());
+    REQUIRE_FALSE(forward->Points.empty());
+    REQUIRE_FALSE(reverse->Points.empty());
+    CHECK(forward->Points.size() <= 4u);
+    CHECK(reverse->Points.size() <= 4u);
+    CHECK(Dot(forward->Points.front().Normal, reverse->Points.front().Normal) < -0.95f);
+}
+
+TEST_CASE("Resting box manifolds retain multiple warm-started impulses",
+    "[PhysicsEngine][Manifold][WarmStart]")
+{
+    PhysicsWorld world;
+    // Keep the intentionally overlapping resting configuration persistent so
+    // the second step exercises warm-start matching rather than separation.
+    world.Settings.MaxPositionCorrection = 0.0f;
+    const BodyID planeBody = world.CreateRigidBody(StaticBody());
+    [[maybe_unused]] const ColliderID planeCollider =
+        world.AddCollider(planeBody, PlaneCollider{ Vec3f::Up(), 0.0f });
+
+    const BodyID boxBody = world.CreateRigidBody(
+        DynamicBoxBody(Vec3f{ 0.0f, 0.48f, 0.0f }));
+    [[maybe_unused]] const ColliderID boxCollider =
+        world.AddCollider(boxBody, BoxCollider{ Vec3f{ 0.5f, 0.5f, 0.5f } });
+
+    world.Step(1.0f / 60.0f);
+    REQUIRE_FALSE(world.Contacts().empty());
+    REQUIRE(world.Contacts().front().Points.size() >= 2u);
+
+    world.Step(1.0f / 60.0f);
+    REQUIRE_FALSE(world.Contacts().empty());
+    REQUIRE(world.Contacts().front().Points.size() >= 2u);
+
+    std::size_t warmedPoints = 0u;
+    for (const ContactPoint& point : world.Contacts().front().Points)
+    {
+        if (point.NormalImpulse > 1.0e-6f) ++warmedPoints;
+    }
+    CHECK(warmedPoints >= 2u);
+}
+
 TEST_CASE("Triangle mesh validation builds a SAH BVH and rejects invalid data",
     "[PhysicsEngine][TriangleMesh][Validation]")
 {
@@ -1506,7 +1583,8 @@ TEST_CASE("Rotated BoxCollider uses SAT contacts", "[PhysicsEngine][Narrowphase]
         CollidePair(a, ca, b, cb);
 
     REQUIRE(contact.has_value());
-    REQUIRE(contact->Points.size() == 1);
+    REQUIRE_FALSE(contact->Points.empty());
+    CHECK(contact->Points.size() <= 4u);
     REQUIRE(contact->Points[0].PenetrationDepth > 0.0f);
 }
 

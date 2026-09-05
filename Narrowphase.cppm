@@ -1,6 +1,7 @@
 module;
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <limits>
@@ -399,6 +400,221 @@ export namespace kairo::foundation::physics
         }
 
         return true;
+    }
+
+    [[nodiscard]]
+    inline std::array<Vec3f, 8> BoxVertices(
+        const OrientedBoxFrame& box)
+    {
+        std::array<Vec3f, 8> vertices{};
+        std::size_t index = 0u;
+        for (int x = -1; x <= 1; x += 2)
+        {
+            for (int y = -1; y <= 1; y += 2)
+            {
+                for (int z = -1; z <= 1; z += 2)
+                {
+                    vertices[index++] =
+                        box.Center +
+                        box.Axes[0] * (box.HalfExtents.x * static_cast<float>(x)) +
+                        box.Axes[1] * (box.HalfExtents.y * static_cast<float>(y)) +
+                        box.Axes[2] * (box.HalfExtents.z * static_cast<float>(z));
+                }
+            }
+        }
+        return vertices;
+    }
+
+    [[nodiscard]]
+    inline bool PointInsideBox(
+        const OrientedBoxFrame& box,
+        const Vec3f& point,
+        float tolerance = 1.0e-4f) noexcept
+    {
+        const Vec3f delta = point - box.Center;
+        for (std::size_t axis = 0u; axis < 3u; ++axis)
+        {
+            if (std::abs(Dot(delta, box.Axes[axis])) >
+                BoxExtentAt(box.HalfExtents, axis) + tolerance)
+            {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    inline void AppendUniqueContact(
+        std::vector<ContactPoint>& points,
+        const ContactPoint& candidate)
+    {
+        constexpr float mergeDistanceSq = 1.0e-8f;
+        for (ContactPoint& existing : points)
+        {
+            if ((existing.Position - candidate.Position).LengthSquared() <= mergeDistanceSq &&
+                Dot(SafeNormalize(existing.Normal, Vec3f::Up()),
+                    SafeNormalize(candidate.Normal, Vec3f::Up())) > 0.99f)
+            {
+                if (candidate.PenetrationDepth > existing.PenetrationDepth)
+                {
+                    existing = candidate;
+                }
+                return;
+            }
+        }
+        points.push_back(candidate);
+    }
+
+    inline void ReduceContactPoints(
+        std::vector<ContactPoint>& points,
+        std::size_t maxPoints = 4u)
+    {
+        if (points.size() <= maxPoints)
+        {
+            return;
+        }
+
+        std::vector<ContactPoint> reduced;
+        reduced.reserve(maxPoints);
+        std::vector<bool> selected(points.size(), false);
+
+        std::size_t deepest = 0u;
+        for (std::size_t i = 1u; i < points.size(); ++i)
+        {
+            if (points[i].PenetrationDepth > points[deepest].PenetrationDepth)
+            {
+                deepest = i;
+            }
+        }
+        reduced.push_back(points[deepest]);
+        selected[deepest] = true;
+
+        while (reduced.size() < maxPoints)
+        {
+            std::size_t best = points.size();
+            float bestSpread = -1.0f;
+            for (std::size_t i = 0u; i < points.size(); ++i)
+            {
+                if (selected[i])
+                {
+                    continue;
+                }
+
+                float nearestSq = std::numeric_limits<float>::max();
+                for (const ContactPoint& chosen : reduced)
+                {
+                    nearestSq = std::min(
+                        nearestSq,
+                        (points[i].Position - chosen.Position).LengthSquared());
+                }
+
+                if (nearestSq > bestSpread)
+                {
+                    bestSpread = nearestSq;
+                    best = i;
+                }
+            }
+
+            if (best == points.size())
+            {
+                break;
+            }
+            selected[best] = true;
+            reduced.push_back(points[best]);
+        }
+
+        points = std::move(reduced);
+    }
+
+    inline void BuildBoxBoxContacts(
+        ContactManifold& manifold,
+        const OrientedBoxFrame& boxA,
+        const OrientedBoxFrame& boxB,
+        const Vec3f& collisionNormal,
+        float penetration)
+    {
+        const Vec3f normal =
+            SafeNormalize(collisionNormal, Vec3f::UnitX());
+        const float halfPenetration = penetration * 0.5f;
+
+        for (const Vec3f& vertex : BoxVertices(boxA))
+        {
+            if (PointInsideBox(boxB, vertex))
+            {
+                AppendUniqueContact(
+                    manifold.Points,
+                    MakeContactPoint(
+                        vertex - normal * halfPenetration,
+                        normal,
+                        penetration));
+            }
+        }
+
+        for (const Vec3f& vertex : BoxVertices(boxB))
+        {
+            if (PointInsideBox(boxA, vertex))
+            {
+                AppendUniqueContact(
+                    manifold.Points,
+                    MakeContactPoint(
+                        vertex + normal * halfPenetration,
+                        normal,
+                        penetration));
+            }
+        }
+
+        if (manifold.Points.empty())
+        {
+            const Vec3f pointA = SupportPoint(boxA, normal);
+            const Vec3f pointB = SupportPoint(boxB, -normal);
+            manifold.Points.push_back(
+                MakeContactPoint(
+                    (pointA + pointB) * 0.5f,
+                    normal,
+                    penetration));
+        }
+
+        ReduceContactPoints(manifold.Points, 4u);
+    }
+
+    inline void BuildBoxPlaneContacts(
+        ContactManifold& manifold,
+        const OrientedBoxFrame& box,
+        const PlaneCollider& plane)
+    {
+        const Vec3f planeNormal =
+            SafeNormalize(plane.Normal, Vec3f::Up());
+
+        for (const Vec3f& vertex : BoxVertices(box))
+        {
+            const float signedDistance =
+                Dot(planeNormal, vertex) + plane.Distance;
+            if (signedDistance < 0.0f)
+            {
+                AppendUniqueContact(
+                    manifold.Points,
+                    MakeContactPoint(
+                        vertex - planeNormal * (signedDistance * 0.5f),
+                        -planeNormal,
+                        -signedDistance));
+            }
+        }
+
+        if (manifold.Points.empty())
+        {
+            const float projectedRadius = ProjectBoxRadius(box, planeNormal);
+            const float signedCenter = Dot(planeNormal, box.Center) + plane.Distance;
+            const float penetration = projectedRadius - signedCenter;
+            if (penetration > 0.0f)
+            {
+                manifold.Points.push_back(
+                    MakeContactPoint(
+                        SupportPoint(box, -planeNormal),
+                        -planeNormal,
+                        penetration));
+            }
+        }
+
+        ReduceContactPoints(manifold.Points, 4u);
     }
 
     [[nodiscard]]
@@ -856,49 +1072,53 @@ export namespace kairo::foundation::physics
                     return std::nullopt;
                 }
 
-                const Vec3f pointA =
-                    SupportPoint(frameA, normal);
+                BuildBoxBoxContacts(
+                    manifold,
+                    frameA,
+                    frameB,
+                    normal,
+                    penetration);
+                return manifold;
+            }
 
-                const Vec3f pointB =
-                    SupportPoint(frameB, -normal);
 
-                manifold.Points.push_back(
-                    MakeContactPoint(
-                        (pointA + pointB) * 0.5f,
-                        normal,
-                        penetration));
-
+            if (const auto* boxB = std::get_if<AABBCollider>(&colliderB.Shape))
+            {
+                const OrientedBoxFrame frameB
+                {
+                    centerB,
+                    { Vec3f::UnitX(), Vec3f::UnitY(), Vec3f::UnitZ() },
+                    boxB->HalfExtents
+                };
+                Vec3f normal = Vec3f::UnitX();
+                float penetration = 0.0f;
+                if (!FindBoxBoxSAT(frameA, frameB, normal, penetration))
+                {
+                    return std::nullopt;
+                }
+                BuildBoxBoxContacts(manifold, frameA, frameB, normal, penetration);
                 return manifold;
             }
 
             if (const auto* planeB = std::get_if<PlaneCollider>(&colliderB.Shape))
             {
-                const float projectedRadius =
-                    ProjectBoxRadius(frameA, planeB->Normal);
-
-                const float signedDistance =
-                    Dot(planeB->Normal, frameA.Center) + planeB->Distance;
-
-                const float penetration =
-                    projectedRadius - signedDistance;
-
-                if (penetration <= 0.0f)
+                BuildBoxPlaneContacts(manifold, frameA, *planeB);
+                if (manifold.Points.empty())
                 {
                     return std::nullopt;
                 }
-
-                manifold.Points.push_back(
-                    MakeContactPoint(
-                        SupportPoint(frameA, -planeB->Normal),
-                        -planeB->Normal,
-                        penetration));
-
                 return manifold;
             }
         }
 
         if (const auto* boxA = std::get_if<AABBCollider>(&colliderA.Shape))
         {
+            const OrientedBoxFrame axisAlignedFrameA
+            {
+                centerA,
+                { Vec3f::UnitX(), Vec3f::UnitY(), Vec3f::UnitZ() },
+                boxA->HalfExtents
+            };
             if (const auto* sphereB = std::get_if<SphereCollider>(&colliderB.Shape))
             {
                 const OrientedBoxFrame frameA
@@ -928,69 +1148,45 @@ export namespace kairo::foundation::physics
                 return manifold;
             }
 
-            if (const auto* boxB = std::get_if<AABBCollider>(&colliderB.Shape))
+            if (const auto* boxB = std::get_if<BoxCollider>(&colliderB.Shape))
             {
-                const Vec3f delta =
-                    centerB - centerA;
-
-                const Vec3f overlap
-                {
-                    boxA->HalfExtents.x + boxB->HalfExtents.x - std::abs(delta.x),
-                    boxA->HalfExtents.y + boxB->HalfExtents.y - std::abs(delta.y),
-                    boxA->HalfExtents.z + boxB->HalfExtents.z - std::abs(delta.z)
-                };
-
-                if (overlap.x <= 0.0f || overlap.y <= 0.0f || overlap.z <= 0.0f)
+                const OrientedBoxFrame frameB =
+                    WorldBoxFrame(bodyB, colliderB, boxB->HalfExtents);
+                Vec3f normal = Vec3f::UnitX();
+                float penetration = 0.0f;
+                if (!FindBoxBoxSAT(axisAlignedFrameA, frameB, normal, penetration))
                 {
                     return std::nullopt;
                 }
+                BuildBoxBoxContacts(manifold, axisAlignedFrameA, frameB, normal, penetration);
+                return manifold;
+            }
 
-                Vec3f normal = delta.x >= 0.0f ? Vec3f::UnitX() : -Vec3f::UnitX();
-                float penetration = overlap.x;
-                if (overlap.y < penetration)
+            if (const auto* boxB = std::get_if<AABBCollider>(&colliderB.Shape))
+            {
+                const OrientedBoxFrame frameB
                 {
-                    normal = delta.y >= 0.0f ? Vec3f::UnitY() : -Vec3f::UnitY();
-                    penetration = overlap.y;
-                }
-                if (overlap.z < penetration)
+                    centerB,
+                    { Vec3f::UnitX(), Vec3f::UnitY(), Vec3f::UnitZ() },
+                    boxB->HalfExtents
+                };
+                Vec3f normal = Vec3f::UnitX();
+                float penetration = 0.0f;
+                if (!FindBoxBoxSAT(axisAlignedFrameA, frameB, normal, penetration))
                 {
-                    normal = delta.z >= 0.0f ? Vec3f::UnitZ() : -Vec3f::UnitZ();
-                    penetration = overlap.z;
+                    return std::nullopt;
                 }
-
-                manifold.Points.push_back(
-                    MakeContactPoint(
-                        (centerA + centerB) * 0.5f,
-                        normal,
-                        penetration));
-
+                BuildBoxBoxContacts(manifold, axisAlignedFrameA, frameB, normal, penetration);
                 return manifold;
             }
 
             if (const auto* planeB = std::get_if<PlaneCollider>(&colliderB.Shape))
             {
-                const float projectedRadius =
-                    std::abs(planeB->Normal.x) * boxA->HalfExtents.x +
-                    std::abs(planeB->Normal.y) * boxA->HalfExtents.y +
-                    std::abs(planeB->Normal.z) * boxA->HalfExtents.z;
-
-                const float signedDistance =
-                    Dot(planeB->Normal, centerA) + planeB->Distance;
-
-                const float penetration =
-                    projectedRadius - signedDistance;
-
-                if (penetration <= 0.0f)
+                BuildBoxPlaneContacts(manifold, axisAlignedFrameA, *planeB);
+                if (manifold.Points.empty())
                 {
                     return std::nullopt;
                 }
-
-                manifold.Points.push_back(
-                    MakeContactPoint(
-                        centerA - planeB->Normal * projectedRadius,
-                        -planeB->Normal,
-                        penetration));
-
                 return manifold;
             }
         }
