@@ -126,8 +126,8 @@ Trigger/sensor contacts that report overlap without solver response
 Persistent KairoSpatial DynamicAABBTree broadphase
 Last-step profiling: total, broadphase, narrowphase, solver timings
 Plane pairing for infinite plane colliders
-Sphere-sphere, sphere-plane, sphere-box, AABB-AABB, AABB-plane, box-box SAT, and box-plane contacts
-Sequential impulse solver with warm-started normal/friction impulses
+Sphere-sphere, sphere-plane, sphere-box, AABB-AABB, AABB-plane, box-box, mixed box-AABB SAT, and box-plane contacts
+Sequential impulse solver with geometrically matched persistent multi-point manifolds and warm-started normal/friction impulses
 Separate velocity and position solver iterations
 Baumgarte position correction with static-body protection
 Fixed timestep accumulator through PhysicsWorld::StepFixed
@@ -152,7 +152,7 @@ RigidBody            body records, active flags, sleep/wake helpers
 Collider             sphere/capsule/plane/AABB/box colliders, filters, world bounds
 Broadphase           persistent KairoSpatial DynamicAABBTree pair generation
 ConvexCollision      support maps, GJK/EPA, hull raycasts and point separation
-Narrowphase          exact V1 contact generation and box SAT
+Narrowphase          exact contact generation, box SAT, and deterministic four-point face manifolds
 ContactSolver        warm-started sequential impulses and position correction
 PhysicsDebug         renderer-agnostic debug contacts and AABBs
 PhysicsWorld         ownership, fixed stepping, events, collision response rules, overlap/raycast/sweep queries, sandbox-facing API
@@ -376,7 +376,6 @@ Dynamic/kinematic concave triangle-mesh bodies (static triangle meshes are imple
 Continuous dynamic rigid-body CCD beyond query/projectile sweeps
 Island solver and parallel island dispatch
 Joints and articulated constraints
-Persistent multi-point contact manifolds
 Serialization/replay file format
 Full editor/ImGui tooling
 ```
@@ -387,8 +386,7 @@ Those belong to later engine phases, not `KairoPhysicsMath`.
 
 The rigid body engine now has convex hull validation, GJK/EPA, filtering,
 response, query, and callback surfaces. Near-term rigid-body work should add
-dynamic triangle-mesh motion, persistent multi-point manifolds, general CCD, joints,
-and island solving before larger physics families are added. Those families
+general CCD, joints, and island solving before larger physics families are added. Those families
 should be separate modules that reuse the same world/query/event conventions:
 
 ```text
