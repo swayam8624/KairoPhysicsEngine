@@ -17,6 +17,7 @@ export module Kairo.Foundation.PhysicsEngine.World;
 
 import Kairo.Foundation.Math.Vector;
 import Kairo.Foundation.Math.Matrix;
+import Kairo.Foundation.Math.Quaternion;
 import Kairo.Foundation.Geometry.AABB;
 import Kairo.Foundation.Spatial;
 import Kairo.Foundation.PhysicsMath;
