@@ -3,6 +3,7 @@ name: Agent Triangle Mesh Apply
 on:
   push:
     branches:
+      - complete/opengl-fine-frame-passes
       - complete/triangle-mesh-collision
 
 permissions:
