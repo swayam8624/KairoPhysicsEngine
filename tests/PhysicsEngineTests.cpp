@@ -436,8 +436,12 @@ TEST_CASE("Triangle mesh validation builds a SAH BVH and rejects invalid data",
 
     PhysicsWorld world;
     const BodyID dynamicBody = world.CreateRigidBody(DynamicBoxBody(Vec3f::Zero()));
-    REQUIRE_THROWS_AS(
-        world.AddCollider(dynamicBody, FloorMesh()), std::invalid_argument);
+    const ColliderID dynamicMesh = world.AddCollider(dynamicBody, FloorMesh());
+    REQUIRE(world.IsValidCollider(dynamicMesh));
+    const auto& dynamicMeshShape =
+        std::get<TriangleMeshCollider>(world.Colliders().at(dynamicMesh).Shape);
+    REQUIRE_FALSE(dynamicMeshShape.Acceleration.Empty());
+    CHECK(dynamicMeshShape.Acceleration.IsValid());
 }
 
 TEST_CASE("Static triangle meshes collide query raycast sweep and debug consistently",
