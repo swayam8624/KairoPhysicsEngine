@@ -1955,10 +1955,12 @@ TEST_CASE("Dynamic triangle meshes collide with convex peers", "[PhysicsEngine][
     REQUIRE(world.IsValidCollider(meshCollider));
     REQUIRE(world.IsValidCollider(sphereCollider));
     REQUIRE_FALSE(world.Contacts().empty());
-    CHECK((world.Contacts().front().ColliderA == meshCollider &&
-           world.Contacts().front().ColliderB == sphereCollider) ||
-          (world.Contacts().front().ColliderA == sphereCollider &&
-           world.Contacts().front().ColliderB == meshCollider));
+    const bool expectedPair =
+        (world.Contacts().front().ColliderA == meshCollider &&
+         world.Contacts().front().ColliderB == sphereCollider) ||
+        (world.Contacts().front().ColliderA == sphereCollider &&
+         world.Contacts().front().ColliderB == meshCollider);
+    CHECK(expectedPair);
 }
 
 TEST_CASE("Kinematic triangle meshes track body transforms", "[PhysicsEngine][TriangleMesh][Kinematic]")
