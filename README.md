@@ -111,10 +111,10 @@ Stable vector-index body/collider ids with inactive deletion-safe records
 Dynamic, static, and kinematic body behavior
 Per-body gravity scale, damping, max velocity clamps, sleeping, and wake hooks
 Per-body Discrete/Continuous collision detection with relative-motion TOI clipping
-Sphere, plane, AABB, oriented box, validated convex-hull, and static triangle-mesh shapes
+Sphere, plane, AABB, oriented box, validated convex-hull, and rigid triangle-mesh shapes
 CapsuleCollider with sphere/capsule/plane/AABB/oriented-box contacts
 GJK intersection and EPA penetration for convex hulls against finite convex shapes
-Static triangle meshes with KairoSpatial SAH BVH acceleration, exact rays/sweeps, and convex contact generation
+Rigid triangle meshes on static, kinematic, and dynamic bodies with KairoSpatial SAH BVH acceleration, exact rays/sweeps, convex contacts, and mesh-pair contacts
 Exact convex-hull plane contacts, raycasts, sphere sweeps, bounds, and debug topology
 Collider local center and local rotation
 BelongsTo / CollidesWith collision filters
@@ -375,7 +375,7 @@ bullet.CollisionDetection = CollisionDetectionMode::Continuous;
 // configure mass/state, create body, then attach any finite convex collider
 ```
 
-This is deliberately conservative for boxes/capsules/hulls: their enclosing sweep
+This is deliberately conservative for boxes/capsules/hulls/triangle meshes: their enclosing sweep
 sphere can stop slightly early, but it cannot miss a translation-only tunnel that
 the bound covers. Angular swept-volume CCD remains a future refinement.
 
@@ -448,7 +448,6 @@ or be represented by a new replay command in a future format version.
 Still deferred:
 
 ```text
-Dynamic/kinematic concave triangle-mesh bodies (static triangle meshes are implemented)
 Full editor/ImGui tooling
 ```
 
