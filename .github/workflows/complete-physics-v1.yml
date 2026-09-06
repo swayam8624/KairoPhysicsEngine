@@ -1,0 +1,182 @@
+name: Complete Physics V1
+
+on:
+  push:
+    branches:
+      - complete/physics-v1
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: complete/physics-v1
+          fetch-depth: 0
+
+      - name: Apply completion patch
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          world = Path('PhysicsWorld.cppm')
+          text = world.read_text()
+          guard = '''            if (std::holds_alternative<TriangleMeshCollider>(shape) &&\n                m_Bodies.at(body).Type != BodyType::Static)\n                throw std::invalid_argument(\n                    "TriangleMeshCollider is static-only until concave dynamic manifold support lands.");\n\n'''
+          if guard not in text:
+              raise SystemExit('triangle mesh static-only guard not found')
+          text = text.replace(guard, '', 1)
+
+          radius_old = '''            // Infinite planes cannot be swept as moving source volumes and\n            // triangle meshes are intentionally static-only in this engine.\n            return 0.0f;\n'''
+          radius_new = '''            if (const auto* mesh = std::get_if<TriangleMeshCollider>(&collider.Shape))\n            {\n                float radius = 0.0f;\n                for (const Vec3f& vertex : mesh->Vertices)\n                {\n                    radius = std::max(radius, vertex.Length());\n                }\n                return radius;\n            }\n\n            // Infinite planes cannot be swept as moving source volumes.\n            return 0.0f;\n'''
+          if radius_old not in text:
+              raise SystemExit('triangle mesh CCD radius marker not found')
+          text = text.replace(radius_old, radius_new, 1)
+          world.write_text(text)
+
+          narrow = Path('Narrowphase.cppm')
+          text = narrow.read_text()
+          marker = '''    [[nodiscard]]\n    inline std::optional<ContactManifold> CollideTriangleMesh(\n'''
+          if marker not in text:
+              raise SystemExit('triangle mesh narrowphase marker not found')
+          mesh_mesh = '''    [[nodiscard]]\n    inline std::optional<ContactManifold> CollideTriangleMeshes(\n        const RigidBody& bodyA,\n        const Collider& colliderA,\n        const TriangleMeshCollider& meshA,\n        const RigidBody& bodyB,\n        const Collider& colliderB,\n        const TriangleMeshCollider& meshB)\n    {\n        if (meshA.Acceleration.Empty() || meshB.Acceleration.Empty())\n            return std::nullopt;\n\n        const AABBf boundsB = WorldAABB(bodyB, colliderB);\n        if (!boundsB.IsValid()) return std::nullopt;\n\n        const AABBf queryA =\n            WorldBoundsToColliderLocal(bodyA, colliderA, boundsB);\n        const auto candidatesA = kairo::foundation::spatial::QueryAABB(\n            meshA.Acceleration, queryA);\n\n        std::optional<ConvexPenetration> deepest;\n        for (const auto triangleA : candidatesA.PrimitiveIndices)\n        {\n            if (triangleA >= meshA.Triangles.size()) continue;\n\n            Collider prismA = colliderA;\n            prismA.Shape = MakeTriangleCollisionPrism(meshA, triangleA);\n            const AABBf prismABounds = WorldAABB(bodyA, prismA);\n            if (!prismABounds.IsValid()) continue;\n\n            const AABBf queryB =\n                WorldBoundsToColliderLocal(bodyB, colliderB, prismABounds);\n            const auto candidatesB = kairo::foundation::spatial::QueryAABB(\n                meshB.Acceleration, queryB);\n\n            for (const auto triangleB : candidatesB.PrimitiveIndices)\n            {\n                if (triangleB >= meshB.Triangles.size()) continue;\n\n                Collider prismB = colliderB;\n                prismB.Shape = MakeTriangleCollisionPrism(meshB, triangleB);\n                const auto penetration =\n                    CollideConvex(bodyA, prismA, bodyB, prismB);\n                if (penetration &&\n                    (!deepest || penetration->Depth > deepest->Depth))\n                {\n                    deepest = penetration;\n                }\n            }\n        }\n\n        if (!deepest) return std::nullopt;\n\n        ContactManifold manifold = MakeContactManifold(\n            bodyA.ID, bodyB.ID, colliderA.ID, colliderB.ID,\n            colliderA.IsTrigger || colliderB.IsTrigger);\n        manifold.Points.push_back(MakeContactPoint(\n            deepest->Position, deepest->Normal, deepest->Depth));\n        return manifold;\n    }\n\n'''
+          text = text.replace(marker, mesh_mesh + marker, 1)
+
+          old_dispatch = '''        if (const auto* meshA = std::get_if<TriangleMeshCollider>(&colliderA.Shape))\n        {\n            return CollideTriangleMesh(\n                bodyA, colliderA, *meshA, bodyB, colliderB);\n        }\n'''
+          new_dispatch = '''        if (const auto* meshA = std::get_if<TriangleMeshCollider>(&colliderA.Shape))\n        {\n            if (const auto* meshB = std::get_if<TriangleMeshCollider>(&colliderB.Shape))\n            {\n                return CollideTriangleMeshes(\n                    bodyA, colliderA, *meshA, bodyB, colliderB, *meshB);\n            }\n\n            return CollideTriangleMesh(\n                bodyA, colliderA, *meshA, bodyB, colliderB);\n        }\n'''
+          if old_dispatch not in text:
+              raise SystemExit('triangle mesh dispatch marker not found')
+          text = text.replace(old_dispatch, new_dispatch, 1)
+          narrow.write_text(text)
+
+          tests = Path('tests/PhysicsEngineTests.cpp')
+          text = tests.read_text()
+          test_marker = '''TEST_CASE("Physics snapshots round-trip deterministic world state",\n'''
+          if test_marker not in text:
+              raise SystemExit('test insertion marker not found')
+          additions = r'''TEST_CASE("Dynamic triangle meshes collide with convex peers", "[PhysicsEngine][TriangleMesh][Dynamic]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    RigidBodyDesc moving = DynamicBoxBody(Vec3f::Zero(), Vec3f{ 1.0f, 0.1f, 1.0f });
+    moving.EnableGravity = false;
+    moving.State.LinearVelocity = Vec3f{ 0.0f, 1.0f, 0.0f };
+    const BodyID meshBody = world.CreateRigidBody(moving);
+    const ColliderID meshCollider = world.AddCollider(meshBody, FloorMesh(1.0f));
+
+    const BodyID sphereBody = world.CreateRigidBody(StaticBody(Vec3f{ 0.0f, 0.1f, 0.0f }));
+    const ColliderID sphereCollider = world.AddCollider(sphereBody, SphereCollider{ 0.25f });
+
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.IsValidCollider(meshCollider));
+    REQUIRE(world.IsValidCollider(sphereCollider));
+    REQUIRE_FALSE(world.Contacts().empty());
+    CHECK((world.Contacts().front().ColliderA == meshCollider &&
+           world.Contacts().front().ColliderB == sphereCollider) ||
+          (world.Contacts().front().ColliderA == sphereCollider &&
+           world.Contacts().front().ColliderB == meshCollider));
+}
+
+TEST_CASE("Kinematic triangle meshes track body transforms", "[PhysicsEngine][TriangleMesh][Kinematic]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    RigidBodyDesc moving;
+    moving.Type = BodyType::Kinematic;
+    moving.State.Position = Vec3f{ 0.0f, -1.0f, 0.0f };
+    moving.State.LinearVelocity = Vec3f{ 0.0f, 2.0f, 0.0f };
+    moving.Mass = StaticMassProperties();
+    const BodyID meshBody = world.CreateRigidBody(moving);
+    const ColliderID meshCollider = world.AddCollider(meshBody, FloorMesh(1.0f));
+
+    const BodyID sphereBody = world.CreateRigidBody(StaticBody(Vec3f{ 0.0f, 0.15f, 0.0f }));
+    [[maybe_unused]] const ColliderID sphereCollider =
+        world.AddCollider(sphereBody, SphereCollider{ 0.25f });
+
+    for (int step = 0; step < 30 && world.Contacts().empty(); ++step)
+        world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.IsValidCollider(meshCollider));
+    REQUIRE_FALSE(world.Contacts().empty());
+}
+
+TEST_CASE("Triangle mesh pairs use BVH accelerated prism contacts", "[PhysicsEngine][TriangleMesh][MeshMesh]")
+{
+    const RigidBody bodyA = MakeRigidBody(0, StaticBody(Vec3f::Zero()));
+    const RigidBody bodyB = MakeRigidBody(1, StaticBody(Vec3f{ 0.0f, 5.0e-4f, 0.0f }));
+    const Collider colliderA = MakeCollider(0, 0, FloorMesh(1.0f));
+    const Collider colliderB = MakeCollider(
+        1, 1, FloorMesh(1.0f), {}, Vec3f::Zero(), RotationAroundZ(0.05f));
+
+    const auto contact = CollidePair(bodyA, colliderA, bodyB, colliderB);
+    REQUIRE(contact.has_value());
+    REQUIRE_FALSE(contact->Points.empty());
+    CHECK(contact->Points.front().PenetrationDepth > 0.0f);
+}
+
+TEST_CASE("Continuous dynamic triangle meshes receive conservative CCD clipping", "[PhysicsEngine][TriangleMesh][CCD]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    RigidBodyDesc moving = DynamicBoxBody(
+        Vec3f{ -4.0f, 0.0f, 0.0f }, Vec3f{ 0.5f, 0.1f, 0.5f });
+    moving.EnableGravity = false;
+    moving.CollisionDetection = CollisionDetectionMode::Continuous;
+    moving.State.LinearVelocity = Vec3f{ 40.0f, 0.0f, 0.0f };
+    const BodyID meshBody = world.CreateRigidBody(moving);
+    [[maybe_unused]] const ColliderID meshCollider =
+        world.AddCollider(meshBody, FloorMesh(0.5f));
+
+    const BodyID obstacleBody = world.CreateRigidBody(StaticBody(Vec3f::Zero()));
+    [[maybe_unused]] const ColliderID obstacleCollider =
+        world.AddCollider(obstacleBody, SphereCollider{ 0.5f });
+
+    world.Step(0.2f);
+
+    CHECK(world.Bodies().at(meshBody).State.Position.x < 1.0f);
+}
+
+'''
+          text = text.replace(test_marker, additions + test_marker, 1)
+          tests.write_text(text)
+
+          readme = Path('README.md')
+          text = readme.read_text()
+          replacements = {
+              'Sphere, plane, AABB, oriented box, validated convex-hull, and static triangle-mesh shapes':
+                  'Sphere, plane, AABB, oriented box, validated convex-hull, and rigid triangle-mesh shapes',
+              'Static triangle meshes with KairoSpatial SAH BVH acceleration, exact rays/sweeps, and convex contact generation':
+                  'Rigid triangle meshes on static, kinematic, and dynamic bodies with KairoSpatial SAH BVH acceleration, exact rays/sweeps, convex contacts, and mesh-pair contacts',
+              'Dynamic/kinematic concave triangle-mesh bodies (static triangle meshes are implemented)\nFull editor/ImGui tooling':
+                  'Full editor/ImGui tooling',
+              'This is deliberately conservative for boxes/capsules/hulls: their enclosing sweep\nsphere can stop slightly early, but it cannot miss a translation-only tunnel that\nthe bound covers. Angular swept-volume CCD remains a future refinement.':
+                  'This is deliberately conservative for boxes/capsules/hulls/triangle meshes: their enclosing sweep\nsphere can stop slightly early, but it cannot miss a translation-only tunnel that\nthe bound covers. Angular swept-volume CCD remains a future refinement.'
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'README marker not found: {old[:60]}')
+              text = text.replace(old, new, 1)
+          readme.write_text(text)
+          PY
+
+      - name: Commit completion
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/complete-physics-v1.yml
+          git add PhysicsWorld.cppm Narrowphase.cppm README.md tests/PhysicsEngineTests.cpp
+          git diff --cached --check
+          git commit -m "Physics: complete moving triangle mesh rigid bodies"
+          git push origin HEAD:complete/physics-v1
