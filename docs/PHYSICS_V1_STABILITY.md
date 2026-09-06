@@ -21,7 +21,7 @@ KairoPhysicsEngine V1 is the stable rigid-body simulation layer for Kairo.
 
 Triangle meshes keep their acceleration structure in collider-local space. Body and collider transforms are applied when broadphase bounds, queries, sweeps, and narrowphase contacts are evaluated, so moving meshes do not rebuild their local BVH every frame.
 
-Dynamic triangle-mesh bodies use the mass and inertia supplied by the body description. The collision mesh does not implicitly derive mass properties.
+Dynamic triangle-mesh bodies use the mass and inertia supplied by the body description. The collision mesh does not implicitly derive mass properties. Regression coverage validates moving-mesh construction, dynamic and kinematic contacts, mesh-pair contacts, and continuous translational motion.
 
 ## Collision pipeline
 
