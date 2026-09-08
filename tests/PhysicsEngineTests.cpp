@@ -436,8 +436,12 @@ TEST_CASE("Triangle mesh validation builds a SAH BVH and rejects invalid data",
 
     PhysicsWorld world;
     const BodyID dynamicBody = world.CreateRigidBody(DynamicBoxBody(Vec3f::Zero()));
-    REQUIRE_THROWS_AS(
-        world.AddCollider(dynamicBody, FloorMesh()), std::invalid_argument);
+    const ColliderID dynamicMesh = world.AddCollider(dynamicBody, FloorMesh());
+    REQUIRE(world.IsValidCollider(dynamicMesh));
+    const auto& dynamicMeshShape =
+        std::get<TriangleMeshCollider>(world.Colliders().at(dynamicMesh).Shape);
+    REQUIRE_FALSE(dynamicMeshShape.Acceleration.Empty());
+    CHECK(dynamicMeshShape.Acceleration.IsValid());
 }
 
 TEST_CASE("Static triangle meshes collide query raycast sweep and debug consistently",
@@ -1934,6 +1938,97 @@ TEST_CASE("Invalid world inputs throw", "[PhysicsEngine][Validation]")
     REQUIRE_THROWS_AS(invalidSettingsWorld.Step(1.0f / 60.0f), std::invalid_argument);
 }
 
+
+TEST_CASE("Dynamic triangle meshes collide with convex peers", "[PhysicsEngine][TriangleMesh][Dynamic]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    RigidBodyDesc moving = DynamicBoxBody(Vec3f::Zero(), Vec3f{ 1.0f, 0.1f, 1.0f });
+    moving.EnableGravity = false;
+    moving.State.LinearVelocity = Vec3f{ 0.0f, 1.0f, 0.0f };
+    const BodyID meshBody = world.CreateRigidBody(moving);
+    const ColliderID meshCollider = world.AddCollider(meshBody, FloorMesh(1.0f));
+
+    const BodyID sphereBody = world.CreateRigidBody(StaticBody(Vec3f{ 0.0f, 0.1f, 0.0f }));
+    const ColliderID sphereCollider = world.AddCollider(sphereBody, SphereCollider{ 0.25f });
+
+    world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.IsValidCollider(meshCollider));
+    REQUIRE(world.IsValidCollider(sphereCollider));
+    REQUIRE_FALSE(world.Contacts().empty());
+    const bool expectedPair =
+        (world.Contacts().front().ColliderA == meshCollider &&
+         world.Contacts().front().ColliderB == sphereCollider) ||
+        (world.Contacts().front().ColliderA == sphereCollider &&
+         world.Contacts().front().ColliderB == meshCollider);
+    CHECK(expectedPair);
+}
+
+TEST_CASE("Kinematic triangle meshes track body transforms", "[PhysicsEngine][TriangleMesh][Kinematic]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    RigidBodyDesc moving;
+    moving.Type = BodyType::Kinematic;
+    moving.State.Position = Vec3f{ 0.0f, -1.0f, 0.0f };
+    moving.State.LinearVelocity = Vec3f{ 0.0f, 2.0f, 0.0f };
+    moving.Mass = StaticMassProperties();
+    const BodyID meshBody = world.CreateRigidBody(moving);
+    const ColliderID meshCollider = world.AddCollider(meshBody, FloorMesh(1.0f));
+
+    const BodyID sphereBody = world.CreateRigidBody(StaticBody(Vec3f{ 0.0f, 0.15f, 0.0f }));
+    [[maybe_unused]] const ColliderID sphereCollider =
+        world.AddCollider(sphereBody, SphereCollider{ 0.25f });
+
+    for (int step = 0; step < 30 && world.Contacts().empty(); ++step)
+        world.Step(1.0f / 60.0f);
+
+    REQUIRE(world.IsValidCollider(meshCollider));
+    REQUIRE_FALSE(world.Contacts().empty());
+}
+
+TEST_CASE("Triangle mesh pairs use BVH accelerated prism contacts", "[PhysicsEngine][TriangleMesh][MeshMesh]")
+{
+    const RigidBody bodyA = MakeRigidBody(0, StaticBody(Vec3f::Zero()));
+    const RigidBody bodyB = MakeRigidBody(1, StaticBody(Vec3f{ 0.0f, 5.0e-4f, 0.0f }));
+    const Collider colliderA = MakeCollider(0, 0, FloorMesh(1.0f));
+    const Collider colliderB = MakeCollider(
+        1, 1, FloorMesh(1.0f), {}, Vec3f::Zero(), RotationAroundZ(0.05f));
+
+    const auto contact = CollidePair(bodyA, colliderA, bodyB, colliderB);
+    REQUIRE(contact.has_value());
+    REQUIRE_FALSE(contact->Points.empty());
+    CHECK(contact->Points.front().PenetrationDepth > 0.0f);
+}
+
+TEST_CASE("Continuous dynamic triangle meshes receive conservative CCD clipping", "[PhysicsEngine][TriangleMesh][CCD]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    RigidBodyDesc moving = DynamicBoxBody(
+        Vec3f{ -4.0f, 0.0f, 0.0f }, Vec3f{ 0.5f, 0.1f, 0.5f });
+    moving.EnableGravity = false;
+    moving.CollisionDetection = CollisionDetectionMode::Continuous;
+    moving.State.LinearVelocity = Vec3f{ 40.0f, 0.0f, 0.0f };
+    const BodyID meshBody = world.CreateRigidBody(moving);
+    [[maybe_unused]] const ColliderID meshCollider =
+        world.AddCollider(meshBody, FloorMesh(0.5f));
+
+    const BodyID obstacleBody = world.CreateRigidBody(StaticBody(Vec3f::Zero()));
+    [[maybe_unused]] const ColliderID obstacleCollider =
+        world.AddCollider(obstacleBody, SphereCollider{ 0.5f });
+
+    world.Step(0.2f);
+
+    CHECK(world.Bodies().at(meshBody).State.Position.x < 1.0f);
+}
 
 TEST_CASE("Physics snapshots round-trip deterministic world state",
     "[PhysicsEngine][Serialization]")

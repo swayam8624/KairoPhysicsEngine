@@ -226,11 +226,6 @@ export namespace kairo::foundation::physics
                 throw std::out_of_range("AddCollider failed: body id does not exist or is inactive.");
             }
 
-            if (std::holds_alternative<TriangleMeshCollider>(shape) &&
-                m_Bodies.at(body).Type != BodyType::Static)
-                throw std::invalid_argument(
-                    "TriangleMeshCollider is static-only until concave dynamic manifold support lands.");
-
             const ColliderID id =
                 static_cast<ColliderID>(m_Colliders.size());
 
@@ -2663,8 +2658,17 @@ export namespace kairo::foundation::physics
                 return radius;
             }
 
-            // Infinite planes cannot be swept as moving source volumes and
-            // triangle meshes are intentionally static-only in this engine.
+            if (const auto* mesh = std::get_if<TriangleMeshCollider>(&collider.Shape))
+            {
+                float radius = 0.0f;
+                for (const Vec3f& vertex : mesh->Vertices)
+                {
+                    radius = std::max(radius, vertex.Length());
+                }
+                return radius;
+            }
+
+            // Infinite planes cannot be swept as moving source volumes.
             return 0.0f;
         }
 

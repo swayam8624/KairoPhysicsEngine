@@ -670,6 +670,67 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    inline std::optional<ContactManifold> CollideTriangleMeshes(
+        const RigidBody& bodyA,
+        const Collider& colliderA,
+        const TriangleMeshCollider& meshA,
+        const RigidBody& bodyB,
+        const Collider& colliderB,
+        const TriangleMeshCollider& meshB)
+    {
+        if (meshA.Acceleration.Empty() || meshB.Acceleration.Empty())
+            return std::nullopt;
+
+        const AABBf boundsB = WorldAABB(bodyB, colliderB);
+        if (!boundsB.IsValid()) return std::nullopt;
+
+        const AABBf queryA =
+            WorldBoundsToColliderLocal(bodyA, colliderA, boundsB);
+        const auto candidatesA = kairo::foundation::spatial::QueryAABB(
+            meshA.Acceleration, queryA);
+
+        std::optional<ConvexPenetration> deepest;
+        for (const auto triangleA : candidatesA.PrimitiveIndices)
+        {
+            if (triangleA >= meshA.Triangles.size()) continue;
+
+            Collider prismA = colliderA;
+            prismA.Shape = MakeTriangleCollisionPrism(meshA, triangleA);
+            const AABBf prismABounds = WorldAABB(bodyA, prismA);
+            if (!prismABounds.IsValid()) continue;
+
+            const AABBf queryB =
+                WorldBoundsToColliderLocal(bodyB, colliderB, prismABounds);
+            const auto candidatesB = kairo::foundation::spatial::QueryAABB(
+                meshB.Acceleration, queryB);
+
+            for (const auto triangleB : candidatesB.PrimitiveIndices)
+            {
+                if (triangleB >= meshB.Triangles.size()) continue;
+
+                Collider prismB = colliderB;
+                prismB.Shape = MakeTriangleCollisionPrism(meshB, triangleB);
+                const auto penetration =
+                    CollideConvex(bodyA, prismA, bodyB, prismB);
+                if (penetration &&
+                    (!deepest || penetration->Depth > deepest->Depth))
+                {
+                    deepest = penetration;
+                }
+            }
+        }
+
+        if (!deepest) return std::nullopt;
+
+        ContactManifold manifold = MakeContactManifold(
+            bodyA.ID, bodyB.ID, colliderA.ID, colliderB.ID,
+            colliderA.IsTrigger || colliderB.IsTrigger);
+        manifold.Points.push_back(MakeContactPoint(
+            deepest->Position, deepest->Normal, deepest->Depth));
+        return manifold;
+    }
+
+    [[nodiscard]]
     inline std::optional<ContactManifold> CollideTriangleMesh(
         const RigidBody& meshBody,
         const Collider& meshCollider,
@@ -741,6 +802,12 @@ export namespace kairo::foundation::physics
 
         if (const auto* meshA = std::get_if<TriangleMeshCollider>(&colliderA.Shape))
         {
+            if (const auto* meshB = std::get_if<TriangleMeshCollider>(&colliderB.Shape))
+            {
+                return CollideTriangleMeshes(
+                    bodyA, colliderA, *meshA, bodyB, colliderB, *meshB);
+            }
+
             return CollideTriangleMesh(
                 bodyA, colliderA, *meshA, bodyB, colliderB);
         }
