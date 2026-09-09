@@ -30,11 +30,14 @@ if(NOT TARGET KairoPhysicsMath)
         add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../KairoPhysicsMath" "${CMAKE_CURRENT_BINARY_DIR}/_deps/KairoPhysicsMath")
     else()
         include(FetchContent)
+        # These are immutable commit SHAs, not moving branch/tag tips. A shallow
+        # clone can only guarantee the remote tip and stops being able to resolve
+        # a pinned historical object after that dependency advances. Fetch the
+        # commit graph so clean standalone consumers remain reproducible.
         FetchContent_Declare(
             KairoPhysicsMath
             GIT_REPOSITORY https://github.com/swayam8624/KairoPhysicsMath.git
             GIT_TAG ${KAIRO_PHYSICS_ENGINE_PHYSICS_MATH_REVISION}
-            GIT_SHALLOW TRUE
         )
         FetchContent_MakeAvailable(KairoPhysicsMath)
     endif()
@@ -53,7 +56,6 @@ if(NOT TARGET KairoSpatial)
             KairoSpatial
             GIT_REPOSITORY https://github.com/swayam8624/KairoSpatial.git
             GIT_TAG ${KAIRO_PHYSICS_ENGINE_SPATIAL_REVISION}
-            GIT_SHALLOW TRUE
         )
         FetchContent_MakeAvailable(KairoSpatial)
     endif()
