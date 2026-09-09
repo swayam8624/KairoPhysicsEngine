@@ -85,6 +85,7 @@ target_sources(KairoPhysicsEngine
             ProjectileSystem.cppm
             Buoyancy.cppm
             VehicleSystem.cppm
+            CharacterController.cppm
             KairoPhysicsEngine.cppm
 )
 
@@ -135,7 +136,8 @@ if(KAIRO_PHYSICS_ENGINE_BUILD_TESTS)
 
     add_executable(KairoPhysicsEngineTests
         tests/PhysicsEngineTests.cpp
-        tests/VehicleSystemTests.cpp)
+        tests/VehicleSystemTests.cpp
+        tests/CharacterControllerTests.cpp)
     target_link_libraries(KairoPhysicsEngineTests PRIVATE KairoPhysicsEngine Catch2::Catch2WithMain)
 
     enable_testing()
