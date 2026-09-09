@@ -23,7 +23,7 @@ namespace
     }
 
     RigidBodyDesc VehicleChassisBody(
-        const Vec3f& position = Vec3f{ 0.0f, 0.75f, 0.0f },
+        const Vec3f& position = Vec3f{ 0.0f, 0.87f, 0.0f },
         const Vec3f& velocity = Vec3f::Zero())
     {
         RigidBodyDesc desc;
@@ -100,8 +100,12 @@ namespace
             World.SetCollisionFilter(groundCollider,
                 CollisionLayer::StaticWorld, CollisionLayer::All);
 
+            // The chassis mass is about 389 kg. With four 32 kN/m springs,
+            // static load needs about 0.03 m compression, placing the chassis
+            // at roughly y=0.87. Starting at y=0.75 preloads 0.15 m per wheel
+            // and launches the fixture upward before the drive assertion runs.
             Chassis = World.CreateRigidBody(
-                VehicleChassisBody(Vec3f{ 0.0f, 0.75f, 0.0f }, initialVelocity));
+                VehicleChassisBody(Vec3f{ 0.0f, 0.87f, 0.0f }, initialVelocity));
             const ColliderID chassisCollider = World.AddCollider(
                 Chassis, BoxCollider{ Vec3f{ 0.80f, 0.25f, 1.35f } });
             World.SetCollisionFilter(chassisCollider,
