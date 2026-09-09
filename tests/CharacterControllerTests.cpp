@@ -4,6 +4,7 @@
 #include <stdexcept>
 
 import Kairo.Foundation.PhysicsEngine;
+import Kairo.Foundation.PhysicsMath;
 import Kairo.Foundation.Math.Vector;
 
 using namespace kairo::foundation::physics;
