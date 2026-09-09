@@ -24,14 +24,18 @@ namespace
     }
 
     RigidBodyDesc VehicleChassisBody(
-        const Vec3f& position = Vec3f{ 0.0f, 0.87f, 0.0f },
+        const Vec3f& position = Vec3f{ 0.0f, 0.784f, 0.0f },
         const Vec3f& velocity = Vec3f::Zero())
     {
         RigidBodyDesc desc;
         desc.Type = BodyType::Dynamic;
         desc.State.Position = position;
         desc.State.LinearVelocity = velocity;
-        desc.Mass = BoxMassProperties(Vec3f{ 0.80f, 0.25f, 1.35f }, 180.0f);
+        // 0.8 x 0.25 x 1.35 half-extents at 700 kg/m^3 gives a
+        // production-scale ~1512 kg chassis. That makes the default 9 kN-class
+        // drive forces represent normal road-car acceleration rather than the
+        // >2 g launch produced by the old 389 kg test shell.
+        desc.Mass = BoxMassProperties(Vec3f{ 0.80f, 0.25f, 1.35f }, 700.0f);
         desc.LinearDamping = 0.02f;
         desc.AngularDamping = 0.08f;
         desc.AllowSleeping = false;
@@ -101,12 +105,12 @@ namespace
             World.SetCollisionFilter(groundCollider,
                 CollisionLayer::StaticWorld, CollisionLayer::All);
 
-            // The chassis mass is about 389 kg. With four 32 kN/m springs,
-            // static load needs about 0.03 m compression, placing the chassis
-            // at roughly y=0.87. Starting at y=0.75 preloads 0.15 m per wheel
-            // and launches the fixture upward before the drive assertion runs.
+            // ~1512 kg / four wheels is ~3708 N static load per spring. At
+            // 32 kN/m that is ~0.116 m compression. With a 0.30 m radius,
+            // 0.40 m rest length, and mount at local y=-0.20, static chassis
+            // height is therefore about 0.784 m.
             Chassis = World.CreateRigidBody(
-                VehicleChassisBody(Vec3f{ 0.0f, 0.87f, 0.0f }, initialVelocity));
+                VehicleChassisBody(Vec3f{ 0.0f, 0.784f, 0.0f }, initialVelocity));
             const ColliderID chassisCollider = World.AddCollider(
                 Chassis, BoxCollider{ Vec3f{ 0.80f, 0.25f, 1.35f } });
             World.SetCollisionFilter(chassisCollider,
@@ -166,6 +170,7 @@ TEST_CASE("Driven wheels accelerate a grounded chassis in authored forward direc
         chassis.State.Rotation.w);
     CHECK(chassis.State.LinearVelocity.z > 0.25f);
     CHECK(chassis.State.Position.z > 0.05f);
+    CHECK(groundedFrames >= 80u);
     CHECK(state.GroundedWheels >= 2u);
 }
 
