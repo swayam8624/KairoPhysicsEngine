@@ -1,6 +1,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <stdexcept>
@@ -143,16 +144,29 @@ TEST_CASE("Driven wheels accelerate a grounded chassis in authored forward direc
         VehicleControls{ .Throttle = 1.0f });
 
     constexpr float dt = 1.0f / 120.0f;
+    std::size_t groundedFrames = 0u;
+    std::size_t maximumGroundedWheels = 0u;
     for (int step = 0; step < 90; ++step)
     {
         fixture.Vehicles.Step(fixture.World, dt);
+        const std::size_t grounded =
+            fixture.Vehicles.State(fixture.Vehicle).GroundedWheels;
+        if (grounded >= 2u) ++groundedFrames;
+        maximumGroundedWheels = std::max(maximumGroundedWheels, grounded);
         fixture.World.Step(dt);
     }
 
     const RigidBody& chassis = fixture.World.Bodies().at(fixture.Chassis);
+    const auto& state = fixture.Vehicles.State(fixture.Vehicle);
+    CAPTURE(groundedFrames, maximumGroundedWheels, state.GroundedWheels,
+        chassis.State.Position.x, chassis.State.Position.y, chassis.State.Position.z,
+        chassis.State.LinearVelocity.x, chassis.State.LinearVelocity.y,
+        chassis.State.LinearVelocity.z, chassis.State.Rotation.x,
+        chassis.State.Rotation.y, chassis.State.Rotation.z,
+        chassis.State.Rotation.w);
     CHECK(chassis.State.LinearVelocity.z > 0.25f);
     CHECK(chassis.State.Position.z > 0.05f);
-    CHECK(fixture.Vehicles.State(fixture.Vehicle).GroundedWheels >= 2u);
+    CHECK(state.GroundedWheels >= 2u);
 }
 
 TEST_CASE("Steered wheels generate lateral tire response from forward motion",
