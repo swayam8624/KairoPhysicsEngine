@@ -61,15 +61,41 @@ jobs:
         run: choco install ninja -y --no-progress
 
       - name: Configure
-        run: >-
-          cmake -S . -B build -G Ninja
-          -DCMAKE_BUILD_TYPE=Release
-          -DKAIRO_PHYSICS_ENGINE_BUILD_TESTS=ON
-          -DKAIRO_PHYSICS_ENGINE_BUILD_SANDBOX=OFF
-          -DKAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX=OFF
+        shell: bash
+        run: |
+          set +e
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DKAIRO_PHYSICS_ENGINE_BUILD_TESTS=ON \
+            -DKAIRO_PHYSICS_ENGINE_BUILD_SANDBOX=OFF \
+            -DKAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX=OFF 2>&1 | tee configure.log
+          status=${PIPESTATUS[0]}
+          exit $status
 
       - name: Build
-        run: cmake --build build --parallel
+        shell: bash
+        run: |
+          set +e
+          cmake --build build --parallel 2>&1 | tee build.log
+          status=${PIPESTATUS[0]}
+          exit $status
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        shell: bash
+        run: |
+          set +e
+          ctest --test-dir build --output-on-failure 2>&1 | tee test.log
+          status=${PIPESTATUS[0]}
+          exit $status
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: physics-${{ matrix.platform }}-diagnostics
+          path: |
+            configure.log
+            build.log
+            test.log
+          if-no-files-found: ignore
+          retention-days: 7
