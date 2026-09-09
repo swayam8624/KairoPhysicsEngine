@@ -16,3 +16,4 @@ export import Kairo.Foundation.PhysicsEngine.Serialization;
 export import Kairo.Foundation.PhysicsEngine.Replay;
 export import Kairo.Foundation.PhysicsEngine.Projectile;
 export import Kairo.Foundation.PhysicsEngine.Buoyancy;
+export import Kairo.Foundation.PhysicsEngine.VehicleSystem;
