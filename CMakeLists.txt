@@ -84,6 +84,7 @@ target_sources(KairoPhysicsEngine
             PhysicsReplay.cppm
             ProjectileSystem.cppm
             Buoyancy.cppm
+            VehicleSystem.cppm
             KairoPhysicsEngine.cppm
 )
 
@@ -132,7 +133,9 @@ if(KAIRO_PHYSICS_ENGINE_BUILD_TESTS)
     )
     FetchContent_MakeAvailable(Catch2)
 
-    add_executable(KairoPhysicsEngineTests tests/PhysicsEngineTests.cpp)
+    add_executable(KairoPhysicsEngineTests
+        tests/PhysicsEngineTests.cpp
+        tests/VehicleSystemTests.cpp)
     target_link_libraries(KairoPhysicsEngineTests PRIVATE KairoPhysicsEngine Catch2::Catch2WithMain)
 
     enable_testing()
