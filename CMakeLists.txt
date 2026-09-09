@@ -13,7 +13,7 @@ option(KAIRO_PHYSICS_ENGINE_BUILD_GLFW_SANDBOX "Build GLFW KairoPhysicsEngine de
 # targets; these exact pins are clean-clone validated by PhysicsEngine CI so a
 # direct consumer receives the same tested dependency graph on every configure.
 set(KAIRO_PHYSICS_ENGINE_PHYSICS_MATH_REVISION da0573edfbc38fcf518b2db8a2aba5c7e8b3b1b8)
-set(KAIRO_PHYSICS_ENGINE_SPATIAL_REVISION 40d34b83d7cdcfaf19407d85394b2b86c41e4d18)
+set(KAIRO_PHYSICS_ENGINE_SPATIAL_REVISION 1de1906372a370b935e11b1d023c7735fe1796f0)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     add_compile_options(-Wall -Wextra -Wno-unused-parameter)
