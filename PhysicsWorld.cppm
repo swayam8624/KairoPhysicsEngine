@@ -2644,9 +2644,9 @@ export namespace kairo::foundation::physics
             {
                 return box->HalfExtents.Length();
             }
-            if (const auto* box = std::get_if<BoxCollider>(&collider.Shape))
+            if (const auto* orientedBox = std::get_if<BoxCollider>(&collider.Shape))
             {
-                return box->HalfExtents.Length();
+                return orientedBox->HalfExtents.Length();
             }
             if (const auto* hull = std::get_if<ConvexHullCollider>(&collider.Shape))
             {
