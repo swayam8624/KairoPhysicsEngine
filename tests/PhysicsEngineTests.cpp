@@ -635,7 +635,7 @@ TEST_CASE("World creates bodies and colliders", "[PhysicsEngine][World]")
         world.CreateRigidBody(DynamicSphereBody(Vec3f{ 0.0f, 1.0f, 0.0f }));
 
     const ColliderID collider =
-        (void)world.AddCollider(body, SphereCollider{ 0.5f });
+        world.AddCollider(body, SphereCollider{ 0.5f });
 
     REQUIRE(body == 0);
     REQUIRE(collider == 0);
@@ -2077,7 +2077,7 @@ TEST_CASE("Physics snapshot file load is strong-exception safe",
     PhysicsWorld world;
     world.Gravity = Vec3f::Zero();
     const BodyID body = world.CreateRigidBody(DynamicSphereBody(Vec3f{ 1.0f, 2.0f, 3.0f }));
-    world.AddCollider(body, SphereCollider{ 0.5f });
+    (void)world.AddCollider(body, SphereCollider{ 0.5f });
     const std::uint64_t expected = PhysicsStateHash(world);
 
     const auto path = std::filesystem::temp_directory_path() / "kairo-physics-snapshot-test.kphys";
