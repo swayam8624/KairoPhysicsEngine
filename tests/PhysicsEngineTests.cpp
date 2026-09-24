@@ -635,7 +635,7 @@ TEST_CASE("World creates bodies and colliders", "[PhysicsEngine][World]")
         world.CreateRigidBody(DynamicSphereBody(Vec3f{ 0.0f, 1.0f, 0.0f }));
 
     const ColliderID collider =
-        world.AddCollider(body, SphereCollider{ 0.5f });
+        (void)world.AddCollider(body, SphereCollider{ 0.5f });
 
     REQUIRE(body == 0);
     REQUIRE(collider == 0);
@@ -2099,7 +2099,7 @@ TEST_CASE("Physics replay reproduces command-driven simulation and detects diver
     recordedWorld.Gravity = Vec3f::Zero();
     recordedWorld.Settings.EnableSleeping = false;
     const BodyID body = recordedWorld.CreateRigidBody(DynamicSphereBody(Vec3f::Zero(), 0.25f));
-    recordedWorld.AddCollider(body, SphereCollider{ 0.25f });
+    (void)recordedWorld.AddCollider(body, SphereCollider{ 0.25f });
 
     PhysicsReplayRecorder recorder(recordedWorld, 1.0f / 120.0f);
     for (int frame = 0; frame < 40; ++frame)
