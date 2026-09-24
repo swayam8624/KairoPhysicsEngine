@@ -421,9 +421,9 @@ export namespace kairo::foundation::physics
         {
             RequirePositiveComponents(box->HalfExtents, "AABBCollider.HalfExtents");
         }
-        else if (const auto* box = std::get_if<BoxCollider>(&shape))
+        else if (const auto* orientedBox = std::get_if<BoxCollider>(&shape))
         {
-            RequirePositiveComponents(box->HalfExtents, "BoxCollider.HalfExtents");
+            RequirePositiveComponents(orientedBox->HalfExtents, "BoxCollider.HalfExtents");
         }
         else if (auto* hull = std::get_if<ConvexHullCollider>(&shape))
         {
