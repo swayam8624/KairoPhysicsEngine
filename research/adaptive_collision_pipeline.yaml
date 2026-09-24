@@ -1,0 +1,35 @@
+schema: kairo.research-track.v1
+track: R4
+title: Adaptive collision pipeline
+state: hypothesis
+problem: A single broadphase/narrowphase policy wastes work across scenes with different density, motion, shape mix and churn.
+hypothesis: Scene telemetry can select collision policies that reduce p95 step cost while preserving a brute-force/contact oracle.
+baselines:
+  - dynamic_aabb_tree
+  - sweep_and_prune
+  - spatial_hash
+  - static_shape_policy
+  - offline_oracle
+workloads:
+  - sparse_fast_projectiles
+  - dense_stack
+  - mixed_static_dynamic
+  - high_churn_spawn_despawn
+  - mesh_heavy_scene
+metrics:
+  - step_ms_p95
+  - broadphase_ms_p95
+  - candidate_pair_count
+  - narrowphase_count
+  - missed_contact_count
+  - false_candidate_count
+  - policy_switch_cost
+ablations:
+  - density_only
+  - velocity_only
+  - no_hysteresis
+failure_cases:
+  - oscillating_density
+  - extreme_ccd
+  - tiny_scenes
+falsification: Reject if adaptive selection does not beat the strongest fixed baseline under the same correctness oracle and budget.
