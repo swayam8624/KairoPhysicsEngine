@@ -341,12 +341,12 @@ export namespace kairo::foundation::physics
             return AABBf::FromCenterExtent(center, box->HalfExtents);
         }
 
-        if (const auto* box = std::get_if<BoxCollider>(&collider.Shape))
+        if (const auto* orientedBox = std::get_if<BoxCollider>(&collider.Shape))
         {
-            RequirePositiveComponents(box->HalfExtents, "BoxCollider.HalfExtents");
+            RequirePositiveComponents(orientedBox->HalfExtents, "BoxCollider.HalfExtents");
 
             const OrientedBoxFrame frame =
-                WorldBoxFrame(body, collider, box->HalfExtents);
+                WorldBoxFrame(body, collider, orientedBox->HalfExtents);
 
             const Vec3f extents =
                 Abs(frame.Axes[0]) * frame.HalfExtents.x +
