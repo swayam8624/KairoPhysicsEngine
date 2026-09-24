@@ -92,6 +92,7 @@ target_sources(KairoPhysicsEngine
 )
 
 target_link_libraries(KairoPhysicsEngine PUBLIC KairoPhysicsMath KairoSpatial Threads::Threads)
+set_property(TARGET KairoPhysicsEngine PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
 # The debug window consumes the engine target, so it must be declared only
 # after the module library and its dependency graph are complete.
@@ -141,6 +142,7 @@ if(KAIRO_PHYSICS_ENGINE_BUILD_TESTS)
         tests/VehicleSystemTests.cpp
         tests/CharacterControllerTests.cpp)
     target_link_libraries(KairoPhysicsEngineTests PRIVATE KairoPhysicsEngine Catch2::Catch2WithMain)
+    set_property(TARGET KairoPhysicsEngineTests PROPERTY COMPILE_WARNING_AS_ERROR ON)
 
     enable_testing()
     add_test(NAME KairoPhysicsEngineTests COMMAND KairoPhysicsEngineTests)
