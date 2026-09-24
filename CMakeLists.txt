@@ -139,6 +139,7 @@ if(KAIRO_PHYSICS_ENGINE_BUILD_TESTS)
 
     add_executable(KairoPhysicsEngineTests
         tests/PhysicsEngineTests.cpp
+        tests/PhysicsStressTests.cpp
         tests/VehicleSystemTests.cpp
         tests/CharacterControllerTests.cpp)
     target_link_libraries(KairoPhysicsEngineTests PRIVATE KairoPhysicsEngine Catch2::Catch2WithMain)
