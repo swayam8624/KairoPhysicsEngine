@@ -2345,13 +2345,13 @@ export namespace kairo::foundation::physics
                         distance,
                         normal);
             }
-            else if (const auto* box = std::get_if<BoxCollider>(&collider.Shape))
+            else if (const auto* orientedBox = std::get_if<BoxCollider>(&collider.Shape))
             {
                 intersects =
                     RaycastOrientedBox(
                         origin,
                         direction,
-                        WorldBoxFrame(body, collider, box->HalfExtents),
+                        WorldBoxFrame(body, collider, orientedBox->HalfExtents),
                         maxDistance,
                         distance,
                         normal);
