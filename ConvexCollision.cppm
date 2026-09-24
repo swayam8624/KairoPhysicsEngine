@@ -84,10 +84,10 @@ export namespace kairo::foundation::physics
                 direction.y >= 0.0f ? box->HalfExtents.y : -box->HalfExtents.y,
                 direction.z >= 0.0f ? box->HalfExtents.z : -box->HalfExtents.z };
 
-        if (const auto* box = std::get_if<BoxCollider>(&collider.Shape))
+        if (const auto* orientedBox = std::get_if<BoxCollider>(&collider.Shape))
         {
             const OrientedBoxFrame frame =
-                WorldBoxFrame(body, collider, box->HalfExtents);
+                WorldBoxFrame(body, collider, orientedBox->HalfExtents);
             Vec3f result = frame.Center;
             for (std::size_t axis = 0u; axis < 3u; ++axis)
             {
