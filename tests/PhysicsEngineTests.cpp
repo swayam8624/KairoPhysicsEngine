@@ -1628,6 +1628,54 @@ TEST_CASE("Ballistic projectile sweep stops exactly at range and lifetime budget
     CHECK(projectiles.Projectiles()[piercing].DistanceTravelled < desc.MaxDistance);
 }
 
+TEST_CASE("Projectile callbacks may spawn future projectiles without invalidating simulation", "[PhysicsEngine][Projectile]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    const BodyID wall = world.CreateRigidBody(
+        StaticBody(Vec3f{ 3.0f, 0.0f, 0.0f }));
+    (void)world.AddCollider(wall, SphereCollider{ 0.5f });
+
+    ProjectileSystem projectiles;
+    ProjectileDesc ray;
+    ray.Mode = ProjectileMode::Hitscan;
+    ray.Position = Vec3f::Zero();
+    ray.Velocity = Vec3f{ 10.0f, 0.0f, 0.0f };
+    ray.MaxDistance = 10.0f;
+
+    (void)projectiles.Spawn(ray);
+    (void)projectiles.Spawn(ray);
+    std::size_t callbacks = 0u;
+    bool recursionRejected = false;
+    projectiles.SetHitCallback([&](const ProjectileHitEvent&)
+    {
+        ++callbacks;
+        try { projectiles.Step(world, 1.0f / 60.0f); }
+        catch (const std::logic_error&) { recursionRejected = true; }
+        // Force multiple reallocations. Every emitted hit must still refer
+        // to an original projectile and no newly spawned projectile may
+        // advance inside this same Step.
+        ProjectileDesc child = ray;
+        child.Mode = ProjectileMode::Ballistic;
+        child.Position = Vec3f{ -100.0f, 0.0f, 0.0f };
+        for (std::size_t i = 0; i < 128u; ++i)
+            (void)projectiles.Spawn(child);
+    });
+
+    projectiles.Step(world, 1.0f / 60.0f);
+    REQUIRE(recursionRejected);
+    REQUIRE(callbacks == 2u);
+    REQUIRE(projectiles.LastHits().size() == 2u);
+    CHECK(projectiles.Projectiles().size() == 258u);
+    CHECK(projectiles.LastHits().front().Projectile == 0u);
+    CHECK(projectiles.LastHits().back().Projectile == 1u);
+    for (std::size_t i = 2u; i < projectiles.Projectiles().size(); ++i)
+    {
+        CHECK(projectiles.Projectiles()[i].Age == 0.0f);
+        CHECK(projectiles.Projectiles()[i].Active);
+    }
+}
+
 TEST_CASE("Buoyancy volumes apply submersion forces and lifecycle events", "[PhysicsEngine][Buoyancy]")
 {
     PhysicsWorld world;
