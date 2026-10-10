@@ -352,7 +352,11 @@ export namespace kairo::foundation::physics
             else
                 projectile.Position += displacement;
 
-            if (rangeLimited || projectile.DistanceTravelled >= projectile.Desc.MaxDistance ||
+            // A contact may occur before the bounded sweep reaches its
+            // distance limit. A piercing or bouncing projectile then still
+            // has range remaining even though the proposed path was clipped.
+            if ((rangeLimited && !hit.has_value()) ||
+                projectile.DistanceTravelled >= projectile.Desc.MaxDistance ||
                 projectile.Age >= projectile.Desc.Lifetime)
                 projectile.Active = false;
         }
