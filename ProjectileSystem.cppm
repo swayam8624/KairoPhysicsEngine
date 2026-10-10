@@ -1,6 +1,7 @@
 module;
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -301,19 +302,42 @@ export namespace kairo::foundation::physics
 
         void StepBallistic(PhysicsWorld& world, ProjectileState& projectile, float dt)
         {
-            projectile.Velocity += world.Gravity * (projectile.Desc.GravityScale * dt);
-            const Vec3f displacement = projectile.Velocity * dt;
-            const float distance = displacement.Length();
-            if (distance <= 1.0e-10f)
+            // Each swept query must stop at the first lifecycle boundary, not
+            // cross it and only mark the projectile inactive afterward. The
+            // previous code let a bullet with 0.1 seconds or 1 metre remaining
+            // hit targets arbitrarily far beyond its authored budget.
+            const float lifetimeLeft = std::max(0.0f,
+                projectile.Desc.Lifetime - projectile.Age);
+            const float rangeLeft = std::max(0.0f,
+                projectile.Desc.MaxDistance - projectile.DistanceTravelled);
+            if (lifetimeLeft <= 0.0f || rangeLeft <= 0.0f)
             {
-                projectile.Age += dt;
-                if (projectile.Age >= projectile.Desc.Lifetime)
-                {
-                    projectile.Active = false;
-                }
+                projectile.Active = false;
                 return;
             }
 
+            const float travelSeconds = std::min(dt, lifetimeLeft);
+            projectile.Velocity +=
+                world.Gravity * (projectile.Desc.GravityScale * travelSeconds);
+            Vec3f displacement = projectile.Velocity * travelSeconds;
+            const float predictedDistance = displacement.Length();
+            // A finite input and a very large velocity can still overflow the
+            // squared-length calculation. Never pass a NaN/Inf sweep to physics.
+            if (!std::isfinite(predictedDistance))
+                throw std::overflow_error(
+                    "Projectile ballistic displacement exceeds finite range.");
+            if (predictedDistance <= 1.0e-10f)
+            {
+                projectile.Age += travelSeconds;
+                if (projectile.Age >= projectile.Desc.Lifetime)
+                    projectile.Active = false;
+                return;
+            }
+
+            const bool rangeLimited = predictedDistance >= rangeLeft;
+            if (rangeLimited)
+                displacement *= rangeLeft / predictedDistance;
+            const float distance = rangeLimited ? rangeLeft : predictedDistance;
             const auto hit = world.SweepSphere(
                 projectile.Position,
                 displacement,
@@ -321,22 +345,16 @@ export namespace kairo::foundation::physics
                 projectile.Desc.CollisionMask,
                 projectile.Desc.IgnoredOwnerCollider);
 
-            projectile.Age += dt;
+            projectile.Age += travelSeconds;
             projectile.DistanceTravelled += hit ? hit->Distance : distance;
             if (hit)
-            {
                 HandleImpact(world, projectile, *hit, projectile.Velocity);
-            }
             else
-            {
                 projectile.Position += displacement;
-            }
 
-            if (projectile.DistanceTravelled >= projectile.Desc.MaxDistance ||
+            if (rangeLimited || projectile.DistanceTravelled >= projectile.Desc.MaxDistance ||
                 projectile.Age >= projectile.Desc.Lifetime)
-            {
                 projectile.Active = false;
-            }
         }
     };
 }
