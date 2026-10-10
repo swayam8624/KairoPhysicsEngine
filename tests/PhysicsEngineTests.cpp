@@ -3,6 +3,7 @@
 #include <variant>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 
 import Kairo.Foundation.PhysicsEngine;
 import Kairo.Foundation.PhysicsMath;
@@ -1779,6 +1780,20 @@ TEST_CASE("Fixed timestep accumulator advances deterministic substeps", "[Physic
         world.CreateRigidBody(desc);
 
     constexpr float fixedDt = 1.0f / 60.0f;
+
+    // Even a sub-frame StepFixed call must reject invalid solver state
+    // *before* recording elapsed time: no Step() will run in this case.
+    world.Settings.VelocityIterations = 0u;
+    REQUIRE_THROWS_AS(
+        world.StepFixed(fixedDt * 0.5f, fixedDt), std::invalid_argument);
+    REQUIRE(world.FixedAccumulator() == Catch::Approx(0.0f));
+    world.Settings.VelocityIterations = 12u;
+
+    world.Gravity.y = std::numeric_limits<float>::quiet_NaN();
+    REQUIRE_THROWS_AS(
+        world.StepFixed(fixedDt * 0.5f, fixedDt), std::invalid_argument);
+    REQUIRE(world.FixedAccumulator() == Catch::Approx(0.0f));
+    world.Gravity = Vec3f::Zero();
 
     REQUIRE(world.StepFixed(fixedDt * 0.5f, fixedDt) == 0);
     REQUIRE(world.Bodies()[body].State.Position.x == Catch::Approx(0.0f));
