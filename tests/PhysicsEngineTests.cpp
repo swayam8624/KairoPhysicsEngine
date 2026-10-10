@@ -1561,6 +1561,57 @@ TEST_CASE("Projectile system handles hitscan ballistic owner ignore and trigger 
     REQUIRE_THROWS_AS(projectiles.Spawn(invalid), std::invalid_argument);
 }
 
+TEST_CASE("Ballistic projectile sweep stops exactly at range and lifetime budgets", "[PhysicsEngine][Projectile]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+
+    ProjectileDesc desc;
+    desc.Mode = ProjectileMode::Ballistic;
+    desc.Position = Vec3f::Zero();
+    desc.Velocity = Vec3f{ 10.0f, 0.0f, 0.0f };
+    desc.GravityScale = 0.0f;
+    desc.Lifetime = 10.0f;
+    desc.MaxDistance = 1.50f;
+
+    ProjectileSystem projectiles;
+    const ProjectileID shortRange = projectiles.Spawn(desc);
+    projectiles.Step(world, 1.0f);
+    REQUIRE_FALSE(projectiles.IsActive(shortRange));
+    CHECK(projectiles.Projectiles()[shortRange].Position.x ==
+        Catch::Approx(1.5f).margin(1.0e-5f));
+    CHECK(projectiles.Projectiles()[shortRange].DistanceTravelled ==
+        Catch::Approx(1.5f).margin(1.0e-5f));
+
+    desc.MaxDistance = 100.0f;
+    desc.Lifetime = 0.25f;
+    const ProjectileID shortLife = projectiles.Spawn(desc);
+    projectiles.Step(world, 1.0f);
+    REQUIRE_FALSE(projectiles.IsActive(shortLife));
+    CHECK(projectiles.Projectiles()[shortLife].Position.x ==
+        Catch::Approx(2.5f).margin(1.0e-5f));
+    CHECK(projectiles.Projectiles()[shortLife].Age ==
+        Catch::Approx(0.25f).margin(1.0e-6f));
+
+    // Two successive updates must use the residual time/range and never
+    // accumulate overshoot just because the final frame is larger.
+    desc.MaxDistance = 3.5f;
+    desc.Lifetime = 0.35f;
+    const ProjectileID bothBudgets = projectiles.Spawn(desc);
+    projectiles.Step(world, 0.20f);
+    REQUIRE(projectiles.IsActive(bothBudgets));
+    CHECK(projectiles.Projectiles()[bothBudgets].Position.x ==
+        Catch::Approx(2.0f).margin(1.0e-5f));
+    projectiles.Step(world, 0.30f);
+    REQUIRE_FALSE(projectiles.IsActive(bothBudgets));
+    CHECK(projectiles.Projectiles()[bothBudgets].Position.x ==
+        Catch::Approx(3.5f).margin(1.0e-4f));
+    CHECK(projectiles.Projectiles()[bothBudgets].Age <= desc.Lifetime + 1.0e-6f);
+    CHECK(projectiles.Projectiles()[bothBudgets].DistanceTravelled <=
+        desc.MaxDistance + 1.0e-6f);
+    CHECK(projectiles.LastHits().empty());
+}
+
 TEST_CASE("Buoyancy volumes apply submersion forces and lifecycle events", "[PhysicsEngine][Buoyancy]")
 {
     PhysicsWorld world;
