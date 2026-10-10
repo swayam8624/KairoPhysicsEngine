@@ -845,13 +845,18 @@ export namespace kairo::foundation::physics
             std::uint32_t maxSubSteps = 8)
         {
             RequireNonNegative(elapsedTime, "elapsedTime");
-            RequirePositive(fixedDt, "fixedDt");
+            ValidateStepSettings(Settings, fixedDt);
+            RequireFinite(Gravity, "Gravity");
 
             if (maxSubSteps == 0)
             {
                 throw std::invalid_argument("maxSubSteps must be greater than zero.");
             }
 
+            // The fixed-step loop may not call Step at all when elapsedTime is
+            // below fixedDt. Validate the step's simulation contract before
+            // changing the accumulator, rather than accepting invalid
+            // solver settings or gravity until a later frame.
             m_FixedAccumulator += elapsedTime;
 
             std::uint32_t steps = 0;
