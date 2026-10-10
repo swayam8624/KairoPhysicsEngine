@@ -1561,6 +1561,121 @@ TEST_CASE("Projectile system handles hitscan ballistic owner ignore and trigger 
     REQUIRE_THROWS_AS(projectiles.Spawn(invalid), std::invalid_argument);
 }
 
+TEST_CASE("Ballistic projectile sweep stops exactly at range and lifetime budgets", "[PhysicsEngine][Projectile]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+
+    ProjectileDesc desc;
+    desc.Mode = ProjectileMode::Ballistic;
+    desc.Position = Vec3f::Zero();
+    desc.Velocity = Vec3f{ 10.0f, 0.0f, 0.0f };
+    desc.GravityScale = 0.0f;
+    desc.Lifetime = 10.0f;
+    desc.MaxDistance = 1.50f;
+
+    ProjectileSystem projectiles;
+    const ProjectileID shortRange = projectiles.Spawn(desc);
+    projectiles.Step(world, 1.0f);
+    REQUIRE_FALSE(projectiles.IsActive(shortRange));
+    CHECK(projectiles.Projectiles()[shortRange].Position.x ==
+        Catch::Approx(1.5f).margin(1.0e-5f));
+    CHECK(projectiles.Projectiles()[shortRange].DistanceTravelled ==
+        Catch::Approx(1.5f).margin(1.0e-5f));
+
+    desc.MaxDistance = 100.0f;
+    desc.Lifetime = 0.25f;
+    const ProjectileID shortLife = projectiles.Spawn(desc);
+    projectiles.Step(world, 1.0f);
+    REQUIRE_FALSE(projectiles.IsActive(shortLife));
+    CHECK(projectiles.Projectiles()[shortLife].Position.x ==
+        Catch::Approx(2.5f).margin(1.0e-5f));
+    CHECK(projectiles.Projectiles()[shortLife].Age ==
+        Catch::Approx(0.25f).margin(1.0e-6f));
+
+    // Two successive updates must use the residual time/range and never
+    // accumulate overshoot just because the final frame is larger.
+    desc.MaxDistance = 3.5f;
+    desc.Lifetime = 0.35f;
+    const ProjectileID bothBudgets = projectiles.Spawn(desc);
+    projectiles.Step(world, 0.20f);
+    REQUIRE(projectiles.IsActive(bothBudgets));
+    CHECK(projectiles.Projectiles()[bothBudgets].Position.x ==
+        Catch::Approx(2.0f).margin(1.0e-5f));
+    projectiles.Step(world, 0.30f);
+    REQUIRE_FALSE(projectiles.IsActive(bothBudgets));
+    CHECK(projectiles.Projectiles()[bothBudgets].Position.x ==
+        Catch::Approx(3.5f).margin(1.0e-4f));
+    CHECK(projectiles.Projectiles()[bothBudgets].Age <= desc.Lifetime + 1.0e-6f);
+    CHECK(projectiles.Projectiles()[bothBudgets].DistanceTravelled <=
+        desc.MaxDistance + 1.0e-6f);
+    CHECK(projectiles.LastHits().empty());
+
+    PhysicsWorld obstacleWorld;
+    obstacleWorld.Gravity = Vec3f::Zero();
+    const BodyID blocker = obstacleWorld.CreateRigidBody(
+        StaticBody(Vec3f{ 2.0f, 0.0f, 0.0f }));
+    (void)obstacleWorld.AddCollider(blocker, SphereCollider{ 0.5f });
+
+    desc.MaxDistance = 5.0f;
+    desc.Lifetime = 10.0f;
+    desc.Radius = 0.10f;
+    desc.Response = ProjectileImpactResponse::Pierce;
+    const ProjectileID piercing = projectiles.Spawn(desc);
+    projectiles.Step(obstacleWorld, 1.0f);
+    REQUIRE(projectiles.LastHits().size() == 1u);
+    CHECK(projectiles.IsActive(piercing));
+    CHECK(projectiles.Projectiles()[piercing].DistanceTravelled < desc.MaxDistance);
+}
+
+TEST_CASE("Projectile callbacks may spawn future projectiles without invalidating simulation", "[PhysicsEngine][Projectile]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    const BodyID wall = world.CreateRigidBody(
+        StaticBody(Vec3f{ 3.0f, 0.0f, 0.0f }));
+    (void)world.AddCollider(wall, SphereCollider{ 0.5f });
+
+    ProjectileSystem projectiles;
+    ProjectileDesc ray;
+    ray.Mode = ProjectileMode::Hitscan;
+    ray.Position = Vec3f::Zero();
+    ray.Velocity = Vec3f{ 10.0f, 0.0f, 0.0f };
+    ray.MaxDistance = 10.0f;
+
+    (void)projectiles.Spawn(ray);
+    (void)projectiles.Spawn(ray);
+    std::size_t callbacks = 0u;
+    bool recursionRejected = false;
+    projectiles.SetHitCallback([&](const ProjectileHitEvent&)
+    {
+        ++callbacks;
+        try { projectiles.Step(world, 1.0f / 60.0f); }
+        catch (const std::logic_error&) { recursionRejected = true; }
+        // Force multiple reallocations. Every emitted hit must still refer
+        // to an original projectile and no newly spawned projectile may
+        // advance inside this same Step.
+        ProjectileDesc child = ray;
+        child.Mode = ProjectileMode::Ballistic;
+        child.Position = Vec3f{ -100.0f, 0.0f, 0.0f };
+        for (std::size_t i = 0; i < 128u; ++i)
+            (void)projectiles.Spawn(child);
+    });
+
+    projectiles.Step(world, 1.0f / 60.0f);
+    REQUIRE(recursionRejected);
+    REQUIRE(callbacks == 2u);
+    REQUIRE(projectiles.LastHits().size() == 2u);
+    CHECK(projectiles.Projectiles().size() == 258u);
+    CHECK(projectiles.LastHits().front().Projectile == 0u);
+    CHECK(projectiles.LastHits().back().Projectile == 1u);
+    for (std::size_t i = 2u; i < projectiles.Projectiles().size(); ++i)
+    {
+        CHECK(projectiles.Projectiles()[i].Age == 0.0f);
+        CHECK(projectiles.Projectiles()[i].Active);
+    }
+}
+
 TEST_CASE("Buoyancy volumes apply submersion forces and lifecycle events", "[PhysicsEngine][Buoyancy]")
 {
     PhysicsWorld world;
