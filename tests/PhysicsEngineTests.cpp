@@ -1725,6 +1725,54 @@ TEST_CASE("World reports deterministic contact begin stay and end events", "[Phy
     REQUIRE(callbackEvents.size() == 3);
 }
 
+TEST_CASE("Contact callbacks may mutate physics topology after the solver completes", "[PhysicsEngine][World][Callbacks]")
+{
+    PhysicsWorld world;
+    world.Gravity = Vec3f::Zero();
+    world.Settings.EnableSleeping = false;
+
+    const BodyID a = world.CreateRigidBody(StaticBody(Vec3f::Zero()));
+    const BodyID b = world.CreateRigidBody(
+        StaticBody(Vec3f{ 0.75f, 0.0f, 0.0f }));
+    (void)world.AddCollider(a, SphereCollider{ 0.5f });
+    (void)world.AddCollider(b, SphereCollider{ 0.5f });
+
+    std::size_t callbackCount = 0u;
+    bool nestedStepRejected = false;
+    bool nestedFixedStepRejected = false;
+    world.SetContactEventCallback([&](const PhysicsContactEvent& event)
+    {
+        ++callbackCount;
+        REQUIRE(event.Type == PhysicsContactEventType::Begin);
+        try { world.Step(1.0f / 60.0f); }
+        catch (const std::logic_error&) { nestedStepRejected = true; }
+        try { world.StepFixed(1.0f / 60.0f, 1.0f / 60.0f); }
+        catch (const std::logic_error&) { nestedFixedStepRejected = true; }
+        // Every creation can reallocate the world body vector. A callback
+        // invoked before the solver has finished would invalidate pointers
+        // and references still used by contact/island processing.
+        for (std::size_t index = 0u; index < 128u; ++index)
+        {
+            (void)world.CreateRigidBody(
+                StaticBody(Vec3f{ 100.0f + static_cast<float>(index), 0.0f, 0.0f }));
+        }
+        world.ClearContactEventCallback();
+    });
+
+    world.Step(1.0f / 60.0f);
+    REQUIRE(callbackCount == 1u);
+    REQUIRE(nestedStepRejected);
+    REQUIRE(nestedFixedStepRejected);
+    REQUIRE(world.Bodies().size() == 130u);
+    REQUIRE(world.ContactEvents().size() == 1u);
+    CHECK(world.ContactEvents().front().Type == PhysicsContactEventType::Begin);
+
+    // The guard must be reset even after callbacks have mutated subscriptions.
+    REQUIRE_NOTHROW(world.Step(1.0f / 60.0f));
+    CHECK(callbackCount == 1u);
+    CHECK(world.Bodies().size() == 130u);
+}
+
 TEST_CASE("Fixed stepping is deterministic for replay-equivalent worlds", "[PhysicsEngine][World]")
 {
     auto makeWorld = []
