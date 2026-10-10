@@ -1610,6 +1610,22 @@ TEST_CASE("Ballistic projectile sweep stops exactly at range and lifetime budget
     CHECK(projectiles.Projectiles()[bothBudgets].DistanceTravelled <=
         desc.MaxDistance + 1.0e-6f);
     CHECK(projectiles.LastHits().empty());
+
+    PhysicsWorld obstacleWorld;
+    obstacleWorld.Gravity = Vec3f::Zero();
+    const BodyID blocker = obstacleWorld.CreateRigidBody(
+        StaticBody(Vec3f{ 2.0f, 0.0f, 0.0f }));
+    (void)obstacleWorld.AddCollider(blocker, SphereCollider{ 0.5f });
+
+    desc.MaxDistance = 5.0f;
+    desc.Lifetime = 10.0f;
+    desc.Radius = 0.10f;
+    desc.Response = ProjectileImpactResponse::Pierce;
+    const ProjectileID piercing = projectiles.Spawn(desc);
+    projectiles.Step(obstacleWorld, 1.0f);
+    REQUIRE(projectiles.LastHits().size() == 1u);
+    CHECK(projectiles.IsActive(piercing));
+    CHECK(projectiles.Projectiles()[piercing].DistanceTravelled < desc.MaxDistance);
 }
 
 TEST_CASE("Buoyancy volumes apply submersion forces and lifecycle events", "[PhysicsEngine][Buoyancy]")
