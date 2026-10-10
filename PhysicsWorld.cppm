@@ -757,6 +757,18 @@ export namespace kairo::foundation::physics
         void Step(
             float dt)
         {
+            // Contact listeners are gameplay code and can create/remove
+            // bodies or launch another simulation. Guard against recursively
+            // stepping an in-flight solver even when callbacks throw.
+            if (m_StepInProgress)
+                throw std::logic_error("PhysicsWorld::Step cannot be recursive.");
+            m_StepInProgress = true;
+            struct StepGuard final
+            {
+                bool& Flag;
+                ~StepGuard() { Flag = false; }
+            } stepGuard{ m_StepInProgress };
+
             const auto stepStart =
                 std::chrono::steady_clock::now();
 
@@ -784,7 +796,9 @@ export namespace kairo::foundation::physics
 
             ApplyCollisionResponses();
             UpdateContactEvents();
-            DispatchContactEvents();
+            // Dispatch only once all solver arrays and profiling have finished.
+            // A listener may mutate topology; never call it while iterating
+            // live contact/body/joint storage.
             WakeContactBodies();
             WakeJointBodies();
             m_LastIslands = BuildSolverIslands(m_Bodies, m_LastContacts, m_Joints);
@@ -833,6 +847,7 @@ export namespace kairo::foundation::physics
                 ElapsedMilliseconds(narrowphaseStart, narrowphaseEnd),
                 ElapsedMilliseconds(solverStart, solverEnd)
             };
+            DispatchContactEvents();
         }
 
         /// Input: variable elapsed time, fixed simulation dt, and substep cap.
@@ -1483,6 +1498,7 @@ export namespace kairo::foundation::physics
         std::vector<CollisionLayerResponseRule> m_LayerResponses;
         CollisionFilterCallback m_CollisionFilterCallback;
         ContactEventCallback m_ContactEventCallback;
+        bool m_StepInProgress = false;
 
         struct ContactEventKey final
         {
@@ -1836,15 +1852,15 @@ export namespace kairo::foundation::physics
 
         void DispatchContactEvents()
         {
-            if (!m_ContactEventCallback)
-            {
-                return;
-            }
+            if (!m_ContactEventCallback) return;
 
-            for (const PhysicsContactEvent& event : m_LastEvents)
-            {
-                m_ContactEventCallback(event);
-            }
+            // Snapshot callback and events before invoking arbitrary gameplay.
+            // A listener is allowed to clear/replace its subscription, modify
+            // topology, or otherwise mutate live state during dispatch.
+            const ContactEventCallback callback = m_ContactEventCallback;
+            const std::vector<PhysicsContactEvent> events = m_LastEvents;
+            for (const PhysicsContactEvent& event : events)
+                callback(event);
         }
 
         void RemoveCollisionRulesForCollider(
