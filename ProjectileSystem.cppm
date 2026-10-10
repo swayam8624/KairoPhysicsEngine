@@ -2,6 +2,7 @@ module;
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <limits>
@@ -188,37 +189,51 @@ export namespace kairo::foundation::physics
         void Step(PhysicsWorld& world, float dt)
         {
             RequirePositive(dt, "ProjectileSystem.dt");
-            m_LastHits.clear();
+            if (m_IsStepping)
+                throw std::logic_error(
+                    "ProjectileSystem::Step must not be called recursively.");
 
-            for (ProjectileState& projectile : m_Projectiles)
+            m_IsStepping = true;
+            try
             {
-                if (!projectile.Active)
+                m_LastHits.clear();
+                const std::size_t initialCount = m_Projectiles.size();
+                for (std::size_t index = 0; index < initialCount; ++index)
                 {
-                    continue;
+                    ProjectileState& projectile = m_Projectiles[index];
+                    if (!projectile.Active) continue;
+
+                    if (projectile.Desc.Mode == ProjectileMode::Hitscan)
+                        StepHitscan(world, projectile);
+                    else
+                        StepBallistic(world, projectile, dt);
                 }
 
-                if (projectile.Desc.Mode == ProjectileMode::Hitscan)
-                {
-                    StepHitscan(world, projectile);
-                    continue;
-                }
-
-                StepBallistic(world, projectile, dt);
+                // Invoke user code only after the simulation loop has stopped
+                // holding ProjectileState references. Gameplay callbacks may
+                // call Spawn(), growing m_Projectiles and invalidating its
+                // iterators, but those new projectiles start next simulation step.
+                // Impact events remain in stable projectile-ID order.
+                for (const ProjectileHitEvent& event : m_LastHits)
+                    if (m_HitCallback) m_HitCallback(event);
             }
+            catch (...)
+            {
+                m_IsStepping = false;
+                throw;
+            }
+            m_IsStepping = false;
         }
 
     private:
         std::vector<ProjectileState> m_Projectiles;
         std::vector<ProjectileHitEvent> m_LastHits;
         HitCallback m_HitCallback;
+        bool m_IsStepping = false;
 
         void EmitHit(const ProjectileHitEvent& event)
         {
             m_LastHits.push_back(event);
-            if (m_HitCallback)
-            {
-                m_HitCallback(event);
-            }
         }
 
         void ApplyImpactImpulse(
