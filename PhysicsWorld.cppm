@@ -859,6 +859,9 @@ export namespace kairo::foundation::physics
             float fixedDt,
             std::uint32_t maxSubSteps = 8)
         {
+            if (m_StepInProgress)
+                throw std::logic_error(
+                    "PhysicsWorld::StepFixed cannot be called during a physics step.");
             RequireNonNegative(elapsedTime, "elapsedTime");
             ValidateStepSettings(Settings, fixedDt);
             RequireFinite(Gravity, "Gravity");
