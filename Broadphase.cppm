@@ -1,3 +1,9 @@
+// SOURCE STUDY NOTE:
+// Potential-collision generation, not penetration resolution. Uses KairoSpatial's dynamic AABB tree
+// to track collider proxies and returns candidate collider-ID pairs for Narrowphase. PhysicsWorld
+// calls this before constructing contact manifolds.
+// See docs/SOURCE_READING_ORDER.md for upstream/downstream APIs and tests.
+
 module;
 
 #include <algorithm>
