@@ -1,3 +1,8 @@
+// LEARNING MAP — rigid body state: mass/inertia, pose, velocities, forces,
+// sleeping and motion type. Contact solvers mutate body velocities; the
+// PhysicsWorld owns stepping and coordinates events/pose updates.
+// Read Collider, Narrowphase and ContactSolver next.
+
 module;
 
 #include <cstdint>
