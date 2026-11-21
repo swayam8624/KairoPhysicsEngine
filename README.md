@@ -472,3 +472,12 @@ KairoVehicles       raycast wheels, suspension, tire friction curves
 The near-term rule is not to fake those systems inside rigid bodies. Each one
 should land with tests, documentation, sandbox demos, and clear integration
 points.
+
+
+## Learn this repository from source
+
+The [Teaching source map](docs/SOURCE_READING_ORDER.md) gives a linked reading sequence, subsystem interactions, public API boundaries, and verification questions. Begin with the public contract and entry point, trace one real operation through its implementation, and use the linked tests to distinguish expected behavior from observed evidence.
+
+**Current scope and limitations.** Broadphase candidates, computed contacts and constraint-solver outcomes are separate stages. A performance or correctness claim needs stress and behavior tests.
+
+**Learning and reuse.** Project-authored code is intended for study, modification and further development under the repository's applicable license. See [LICENSE](LICENSE) where present. Third-party libraries, borrowed source, assets, test data, models and media remain under their own terms; do not treat a top-level license as permission to redistribute restricted content.
