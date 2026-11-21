@@ -1,3 +1,4 @@
+// TEACHING MAP: COLLISION CANDIDATE PHASE: PhysicsWorld sends bodies/colliders here; KairoSpatial DynamicAABBTree identifies potential overlapping pairs. Narrowphase computes actual contacts, solver modules resolve constraints, Renderer only visualizes debug geometry. Infinite colliders use a separate path. Candidate pairs are not confirmed collisions.
 module;
 
 #include <algorithm>
@@ -28,6 +29,7 @@ export namespace kairo::foundation::physics
     };
 
     [[nodiscard]]
+// Canonicalize pair identity for stable deduplication and event ordering.
     inline BroadphasePair OrderedBroadphasePair(
         ColliderID a,
         ColliderID b) noexcept
