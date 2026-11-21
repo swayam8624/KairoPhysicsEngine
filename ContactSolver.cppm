@@ -1,3 +1,9 @@
+// SOURCE STUDY NOTE:
+// Contact response: mutates active RigidBody velocities and cached contact impulses using manifolds
+// and material properties. PhysicsWorld invokes this during fixed stepping; triggers are detected
+// but should not receive blocking impulses.
+// See docs/SOURCE_READING_ORDER.md for upstream/downstream APIs and tests.
+
 module;
 
 #include <algorithm>
