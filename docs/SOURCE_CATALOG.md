@@ -1,0 +1,37 @@
+# KairoPhysicsEngine — complete linked code inventory
+
+Follow [READING_ORDER.md](../READING_ORDER.md) for the conceptual simulation sequence. Each file below is a tracked implementation or test at the generation revision; per-function annotations are staged.
+
+- [`Broadphase.cppm`](../Broadphase.cppm)
+- [`Buoyancy.cppm`](../Buoyancy.cppm)
+- [`CharacterController.cppm`](../CharacterController.cppm)
+- [`Collider.cppm`](../Collider.cppm)
+- [`ContactSolver.cppm`](../ContactSolver.cppm)
+- [`ConvexCollision.cppm`](../ConvexCollision.cppm)
+- [`Joint.cppm`](../Joint.cppm)
+- [`KairoPhysicsEngine.cppm`](../KairoPhysicsEngine.cppm)
+- [`Narrowphase.cppm`](../Narrowphase.cppm)
+- [`PhysicsDebug.cppm`](../PhysicsDebug.cppm)
+- [`PhysicsEngineTypes.cppm`](../PhysicsEngineTypes.cppm)
+- [`PhysicsMaterial.cppm`](../PhysicsMaterial.cppm)
+- [`PhysicsReplay.cppm`](../PhysicsReplay.cppm)
+- [`PhysicsSerialization.cppm`](../PhysicsSerialization.cppm)
+- [`PhysicsWorld.cppm`](../PhysicsWorld.cppm)
+- [`ProjectileSystem.cppm`](../ProjectileSystem.cppm)
+- [`RigidBody.cppm`](../RigidBody.cppm)
+- [`SolverIsland.cppm`](../SolverIsland.cppm)
+- [`VehicleSystem.cppm`](../VehicleSystem.cppm)
+- [`sandbox/DemoScene.cppm`](../sandbox/DemoScene.cppm)
+- [`sandbox/KairoPhysicsGlfwSandbox.cpp`](../sandbox/KairoPhysicsGlfwSandbox.cpp)
+- [`sandbox/KairoPhysicsSandbox.cppm`](../sandbox/KairoPhysicsSandbox.cppm)
+- [`sandbox/PhysicsDebugRenderer.cppm`](../sandbox/PhysicsDebugRenderer.cppm)
+- [`sandbox/SandboxApp.cppm`](../sandbox/SandboxApp.cppm)
+- [`sandbox/SandboxTypes.cppm`](../sandbox/SandboxTypes.cppm)
+- [`sandbox/TerminalRenderer.cppm`](../sandbox/TerminalRenderer.cppm)
+- [`sandbox/examples/main.cpp`](../sandbox/examples/main.cpp)
+- [`tests/CharacterControllerTests.cpp`](../tests/CharacterControllerTests.cpp)
+- [`tests/PhysicsEngineTests.cpp`](../tests/PhysicsEngineTests.cpp)
+- [`tests/PhysicsStressTests.cpp`](../tests/PhysicsStressTests.cpp)
+- [`tests/VehicleSystemTests.cpp`](../tests/VehicleSystemTests.cpp)
+
+**Indexed source files:** 31.
