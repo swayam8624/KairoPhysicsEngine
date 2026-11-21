@@ -1,3 +1,8 @@
+// SOURCE STUDY NOTE:
+// Collision geometry and filter representation associated with body IDs. Broadphase uses approximate
+// bounds, Narrowphase tests actual geometry, and PhysicsWorld manages lifetime/activation.
+// See docs/SOURCE_READING_ORDER.md for upstream/downstream APIs and tests.
+
 module;
 
 #include <algorithm>
