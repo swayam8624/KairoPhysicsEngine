@@ -1,3 +1,9 @@
+// LEARNING MAP — sequential impulse solve of a contact manifold.
+// PhysicsWorld calls the solver after Broadphase and Narrowphase; it
+// changes rigid-body velocities while honoring friction/restitution and
+// optionally warm-starting impulses. Trigger overlaps are not hard contacts.
+// See READING_ORDER.md and tests/PhysicsEngineTests.cpp.
+
 module;
 
 #include <algorithm>
