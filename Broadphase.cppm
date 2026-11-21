@@ -1,3 +1,9 @@
+// LEARNING MAP — efficient *candidate* collision pair selection.
+// This phase answers which body AABBs might overlap, not whether shapes
+// actually collide; Narrowphase must compute valid contacts. PhysicsWorld
+// uses it at fixed steps and should compare it against an all-pairs oracle.
+// See READING_ORDER.md for complexity and correctness implications.
+
 module;
 
 #include <algorithm>
