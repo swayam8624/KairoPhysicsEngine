@@ -1,3 +1,9 @@
+// SOURCE STUDY NOTE:
+// C++23 umbrella module re-exporting physics types, collision stages, world, debug, replay and
+// serialization. Consumers such as KairoPlayer may import the umbrella or specific modules; source
+// implementations remain divided across .cppm files.
+// See docs/SOURCE_READING_ORDER.md for upstream/downstream APIs and tests.
+
 export module Kairo.Foundation.PhysicsEngine;
 
 export import Kairo.Foundation.PhysicsEngine.Types;
