@@ -1,3 +1,9 @@
+// LEARNING MAP — constraints/contact graph partitioning. The simulation
+// groups coupled bodies so independent islands can be solved separately;
+// contacts and joints connect islands, but the public PhysicsWorld owns
+// scheduling and must preserve deterministic iteration where promised.
+// See READING_ORDER.md for the physics step pipeline.
+
 module;
 
 #include <algorithm>

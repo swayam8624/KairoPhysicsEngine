@@ -1,3 +1,9 @@
+// LEARNING MAP — public C++23 umbrella module for rigid body simulation.
+// `import Kairo.Foundation.PhysicsEngine;` exposes Bodies, Colliders,
+// Broadphase, Narrowphase, Solver, Joint, World, serialization and debug APIs.
+// This is a package of distinct modules, not a single simulation function.
+// See READING_ORDER.md to trace a full simulation step.
+
 export module Kairo.Foundation.PhysicsEngine;
 
 export import Kairo.Foundation.PhysicsEngine.Types;

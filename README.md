@@ -1,3 +1,9 @@
+> **Learn the code from first principles:** [READING_ORDER.md](READING_ORDER.md) covers the actual Broadphase → Narrowphase → ContactSolver → PhysicsWorld path and each component's API ownership. [SOURCE_CATALOG.md](docs/SOURCE_CATALOG.md) links every source/test file.
+>
+> **Open source:** independently owned KairoPhysicsEngine code uses the [MIT license](LICENSE); third-party dependencies retain their own terms. Educational reuse and further development are welcome.
+>
+> **Status:** physics-only tests do not by themselves verify a fully integrated 27-repository game engine; see [STATUS.md](STATUS.md).
+
 # KairoPhysicsEngine
 
 `KairoPhysicsEngine` is the rigid-body simulation layer in the Kairo foundation

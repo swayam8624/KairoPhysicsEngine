@@ -1,3 +1,9 @@
+// LEARNING MAP — detailed shape-pair collision computation. Consumes
+// broadphase candidate pairs and Collider geometry, produces contact
+// manifolds for ContactSolver. Narrowphase validity and contact normals
+// determine the physical meaning of later impulse calculations.
+// See READING_ORDER.md and ConvexCollision.cppm for geometry conventions.
+
 module;
 
 #include <algorithm>
