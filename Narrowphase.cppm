@@ -1,3 +1,9 @@
+// SOURCE STUDY NOTE:
+// Exact-ish shape-pair contact evaluation after Broadphase has found candidates. Reads collider
+// geometry and transforms and produces contact manifolds for ContactSolver; convex helpers are
+// provided by ConvexCollision.cppm. Candidate overlap alone is not physical contact.
+// See docs/SOURCE_READING_ORDER.md for upstream/downstream APIs and tests.
+
 module;
 
 #include <algorithm>
