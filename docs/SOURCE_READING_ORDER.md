@@ -10,39 +10,39 @@ Read each phase in order. Every link goes to a source file or directory in this 
 
 ## 1. Basic types
 
-1. [`README.md`](README.md)
-2. [`PhysicsEngineTypes.cppm`](PhysicsEngineTypes.cppm)
-3. [`RigidBody.cppm`](RigidBody.cppm)
-4. [`Collider.cppm`](Collider.cppm)
-5. [`PhysicsMaterial.cppm`](PhysicsMaterial.cppm)
+1. [`README.md`](../README.md)
+2. [`PhysicsEngineTypes.cppm`](../PhysicsEngineTypes.cppm)
+3. [`RigidBody.cppm`](../RigidBody.cppm)
+4. [`Collider.cppm`](../Collider.cppm)
+5. [`PhysicsMaterial.cppm`](../PhysicsMaterial.cppm)
 
 ## 2. One simulation step
 
-1. [`Broadphase.cppm`](Broadphase.cppm)
-2. [`Narrowphase.cppm`](Narrowphase.cppm)
-3. [`ConvexCollision.cppm`](ConvexCollision.cppm)
-4. [`ContactSolver.cppm`](ContactSolver.cppm)
-5. [`SolverIsland.cppm`](SolverIsland.cppm)
-6. [`Joint.cppm`](Joint.cppm)
-7. [`PhysicsWorld.cppm`](PhysicsWorld.cppm)
+1. [`Broadphase.cppm`](../Broadphase.cppm)
+2. [`Narrowphase.cppm`](../Narrowphase.cppm)
+3. [`ConvexCollision.cppm`](../ConvexCollision.cppm)
+4. [`ContactSolver.cppm`](../ContactSolver.cppm)
+5. [`SolverIsland.cppm`](../SolverIsland.cppm)
+6. [`Joint.cppm`](../Joint.cppm)
+7. [`PhysicsWorld.cppm`](../PhysicsWorld.cppm)
 
 ## 3. Gameplay and observability
 
-1. [`CharacterController.cppm`](CharacterController.cppm)
-2. [`VehicleSystem.cppm`](VehicleSystem.cppm)
-3. [`ProjectileSystem.cppm`](ProjectileSystem.cppm)
-4. [`Buoyancy.cppm`](Buoyancy.cppm)
-5. [`PhysicsDebug.cppm`](PhysicsDebug.cppm)
-6. [`PhysicsReplay.cppm`](PhysicsReplay.cppm)
-7. [`PhysicsSerialization.cppm`](PhysicsSerialization.cppm)
+1. [`CharacterController.cppm`](../CharacterController.cppm)
+2. [`VehicleSystem.cppm`](../VehicleSystem.cppm)
+3. [`ProjectileSystem.cppm`](../ProjectileSystem.cppm)
+4. [`Buoyancy.cppm`](../Buoyancy.cppm)
+5. [`PhysicsDebug.cppm`](../PhysicsDebug.cppm)
+6. [`PhysicsReplay.cppm`](../PhysicsReplay.cppm)
+7. [`PhysicsSerialization.cppm`](../PhysicsSerialization.cppm)
 
 ## 4. Verification
 
-1. [`tests/PhysicsEngineTests.cpp`](tests/PhysicsEngineTests.cpp)
-2. [`tests/PhysicsStressTests.cpp`](tests/PhysicsStressTests.cpp)
-3. [`tests/CharacterControllerTests.cpp`](tests/CharacterControllerTests.cpp)
-4. [`tests/VehicleSystemTests.cpp`](tests/VehicleSystemTests.cpp)
-5. [`sandbox`](sandbox)
+1. [`tests/PhysicsEngineTests.cpp`](../tests/PhysicsEngineTests.cpp)
+2. [`tests/PhysicsStressTests.cpp`](../tests/PhysicsStressTests.cpp)
+3. [`tests/CharacterControllerTests.cpp`](../tests/CharacterControllerTests.cpp)
+4. [`tests/VehicleSystemTests.cpp`](../tests/VehicleSystemTests.cpp)
+5. [`sandbox`](../sandbox)
 
 ## End-to-end interaction map
 
