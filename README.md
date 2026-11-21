@@ -1,5 +1,7 @@
 # KairoPhysicsEngine
 
+> **Learn from the implementation:** Read [docs/SOURCE_READING_ORDER.md](docs/SOURCE_READING_ORDER.md) to follow rigid bodies, broadphase, narrowphase, manifolds, solver islands, world stepping, persistence and replay. Original code is [MIT-licensed](LICENSE) for study, use and further development; dependencies retain separate terms.
+
 `KairoPhysicsEngine` is the rigid-body simulation layer in the Kairo foundation
 stack.
 
