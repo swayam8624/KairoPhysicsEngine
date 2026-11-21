@@ -1,3 +1,8 @@
+// SOURCE STUDY NOTE:
+// Body state contract (motion type, mass/inertia, velocities). PhysicsWorld owns and updates these
+// records; Broadphase and Narrowphase consume transforms, while ContactSolver applies impulses.
+// See docs/SOURCE_READING_ORDER.md for upstream/downstream APIs and tests.
+
 module;
 
 #include <cstdint>

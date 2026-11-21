@@ -1,3 +1,9 @@
+// SOURCE STUDY NOTE:
+// Versioned binary physics snapshot encoding/decoding. Captures world state for save and replay;
+// check explicit limits and endian/format assumptions before changing. PhysicsReplay builds on this
+// interface.
+// See docs/SOURCE_READING_ORDER.md for upstream/downstream APIs and tests.
+
 module;
 
 #include <array>

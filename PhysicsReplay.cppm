@@ -1,3 +1,9 @@
+// SOURCE STUDY NOTE:
+// Reproducible command sequence over a serialized initial PhysicsWorld snapshot. Records per-step
+// commands and state hashes; depends on PhysicsSerialization and World. Check tests before claiming
+// platform-wide determinism.
+// See docs/SOURCE_READING_ORDER.md for upstream/downstream APIs and tests.
+
 module;
 
 #include <array>

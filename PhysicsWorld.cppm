@@ -1,3 +1,10 @@
+// SOURCE STUDY NOTE:
+// Top-level fixed-step physics owner. Imports RigidBody, Collider, Broadphase, Narrowphase,
+// ContactSolver, Joint and SolverIsland; the world controls their sequence and produces contact
+// events. KairoGameEngine's RuntimePhysicsBridge maps these session-local physics IDs back to
+// persistent scene entities.
+// See docs/SOURCE_READING_ORDER.md for upstream/downstream APIs and tests.
+
 module;
 
 #include <algorithm>

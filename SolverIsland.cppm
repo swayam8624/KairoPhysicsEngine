@@ -1,3 +1,9 @@
+// SOURCE STUDY NOTE:
+// Constraint island grouping: partition interacting dynamic bodies, contacts and joints before
+// solving; evaluate this with PhysicsWorld and ContactSolver, not as an isolated rendering/gameplay
+// component.
+// See docs/SOURCE_READING_ORDER.md for upstream/downstream APIs and tests.
+
 module;
 
 #include <algorithm>
