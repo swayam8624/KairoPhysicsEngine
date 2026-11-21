@@ -50,12 +50,15 @@ export namespace kairo::foundation::physics
     class BroadphaseWorld final
     {
     public:
+        /// TEACHING METHOD: Rebuilds this spatial cache from empty state; PhysicsWorld owns the actual collider data.
         void Clear()
         {
             m_Tree = spatial::DynamicAABBTree{};
             m_Proxies.clear();
             m_InfiniteColliders.clear();
         }
+
+        /// TEACHING METHOD: Creates or updates finite DynamicAABBTree proxies and handles infinite colliders separately; inactive collider state removes proxies.
 
         void AddOrUpdateCollider(
             const std::vector<RigidBody>& bodies,
@@ -120,6 +123,8 @@ export namespace kairo::foundation::physics
             RemoveInfinite(collider.ID);
         }
 
+        /// TEACHING METHOD: Removes indexing metadata and tree proxy for a ColliderID without deleting the physics collider itself.
+
         void RemoveCollider(
             ColliderID collider)
         {
@@ -140,6 +145,8 @@ export namespace kairo::foundation::physics
             RemoveInfinite(collider);
         }
 
+        /// TEACHING METHOD: Reconciles collider proxies against current PhysicsWorld body/collider arrays before candidate queries.
+
         void Sync(
             const std::vector<RigidBody>& bodies,
             const std::vector<Collider>& colliders)
@@ -149,6 +156,8 @@ export namespace kairo::foundation::physics
                 AddOrUpdateCollider(bodies, collider);
             }
         }
+
+        /// TEACHING METHOD: Produces deduplicated candidates from dynamic-tree overlap and finite/infinite combinations. Narrowphase still tests contact geometry.
 
         [[nodiscard]]
         std::vector<BroadphasePair> ComputePairs(
@@ -192,6 +201,7 @@ export namespace kairo::foundation::physics
         /// locality. The returned IDs are conservative candidates; callers
         /// must still test the actual collider shape when that distinction
         /// matters.
+        /// TEACHING METHOD: Returns box-query candidates with layer filtering; not a proof of contact.
         [[nodiscard]]
         std::vector<ColliderID> QueryAABB(
             const spatial::SpatialAABB& query,
@@ -205,6 +215,7 @@ export namespace kairo::foundation::physics
         /// Task: provide the query primitive needed by radial gameplay effects,
         /// sensors, and future particle/cloth collision systems without a
         /// linear scan through every collider.
+        /// TEACHING METHOD: Returns sphere-query candidates; callers must perform exact shape tests.
         [[nodiscard]]
         std::vector<ColliderID> QuerySphere(
             const Vec3f& center,
@@ -218,6 +229,7 @@ export namespace kairo::foundation::physics
         /// Output: tree candidates plus infinite colliders whose category matches.
         /// Task: serve swept-volume queries. Infinite planes must be included
         /// explicitly because they intentionally have no finite tree proxy.
+        /// TEACHING METHOD: Combines finite-tree and infinite-body candidates for broader scene queries.
         [[nodiscard]]
         std::vector<ColliderID> QueryAABBCandidates(
             const spatial::SpatialAABB& query,
@@ -247,6 +259,7 @@ export namespace kairo::foundation::physics
         /// Task: defer exact shape intersection to PhysicsWorld while avoiding a
         /// full collider scan for the common finite-body case. Planes remain
         /// explicit candidates because an infinite plane cannot enter an AABB tree.
+        /// TEACHING METHOD: Identifies bodies that might meet a ray; the narrowphase/scene query calculates actual intersections.
         [[nodiscard]]
         std::vector<ColliderID> RaycastCandidates(
             const spatial::SpatialRay& ray,
@@ -277,6 +290,8 @@ export namespace kairo::foundation::physics
         std::vector<BroadphaseProxy> m_Proxies;
         std::vector<ColliderID> m_InfiniteColliders;
 
+        /// TEACHING METHOD: Expands or reserves proxy metadata so a ColliderID has stable index storage.
+
         void EnsureProxy(
             ColliderID collider)
         {
@@ -285,6 +300,8 @@ export namespace kairo::foundation::physics
                 m_Proxies.resize(static_cast<std::size_t>(collider) + 1u);
             }
         }
+
+        /// TEACHING METHOD: Stores unbounded collision geometry outside the finite AABB tree.
 
         void AddInfinite(
             ColliderID collider)
@@ -295,6 +312,8 @@ export namespace kairo::foundation::physics
             }
         }
 
+        /// TEACHING METHOD: Removes the auxiliary infinite-collider reference without destroying authoritative collider data.
+
         void RemoveInfinite(
             ColliderID collider)
         {
@@ -302,6 +321,8 @@ export namespace kairo::foundation::physics
                 std::remove(m_InfiniteColliders.begin(), m_InfiniteColliders.end(), collider),
                 m_InfiniteColliders.end());
         }
+
+        /// TEACHING METHOD: Applies activity, body and collision-filter rules to suppress irrelevant candidate pairs.
 
         [[nodiscard]]
         static bool ShouldPair(
@@ -327,6 +348,8 @@ export namespace kairo::foundation::physics
                 CollisionFiltersAllow(ca, cb);
         }
 
+        /// TEACHING METHOD: Canonicalizes and deduplicates pairs to avoid repeated narrowphase evaluations.
+
         static void SortUnique(
             std::vector<BroadphasePair>& pairs)
         {
@@ -346,6 +369,7 @@ export namespace kairo::foundation::physics
     /// Output: deterministic potentially-overlapping collider pairs.
     /// Task: reuse KairoSpatial's dynamic AABB tree for finite collider overlap
     /// queries while pairing infinite planes against all finite colliders.
+    /// TEACHING METHOD: Public convenience for computing broadphase candidates from provided state.
     [[nodiscard]]
     inline std::vector<BroadphasePair> ComputeBroadphasePairs(
         const std::vector<RigidBody>& bodies,
