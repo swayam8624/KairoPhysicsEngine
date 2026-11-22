@@ -44,6 +44,9 @@ export namespace kairo::foundation::physics
     using namespace kairo::foundation::math;
 
     [[nodiscard]]
+    // Select an OBB's local half-extent by axis index (0/1/2).
+    // Caller loops over valid box axes; this convenience helper does not
+    // perform bounds checking of arbitrary user-provided axis indices.
     inline float BoxExtentAt(
         const Vec3f& halfExtents,
         std::size_t axis) noexcept
@@ -66,6 +69,9 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // For an oriented box, choose signed half-extent on each world axis
+    // based on directional dot. The resulting support is used both by SAT
+    // contact fallback and conservative geometric queries.
     inline Vec3f SupportPoint(
         const OrientedBoxFrame& box,
         const Vec3f& direction)
@@ -86,6 +92,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Project the world-space point into each normalized box axis, clamp to
+    // [-extent,+extent], then reconstruct a world-space closest point.
+    // For a point INSIDE the box this returns the point itself; a caller
+    // needing a boundary normal must use a separate interior fallback.
     inline Vec3f ClosestPointOnBox(
         const OrientedBoxFrame& box,
         const Vec3f& point)
@@ -131,6 +141,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Solve two clamped segment parameters for minimum separation. When
+    // nearly parallel or either segment degenerates, use guarded endpoint
+    // paths rather than divide by a near-zero denominator. Capsule/capsule
+    // contacts depend on these witnesses and shape-order normal convention.
     inline std::pair<Vec3f, Vec3f> ClosestPointsOnSegments(
         const Vec3f& a0,
         const Vec3f& a1,
@@ -171,6 +185,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Minimize squared distance from a capsule's centerline to OBB across
+    // segment parameter t in [0,1]. Thirty-two ternary iterations bracket
+    // a convex distance function, then report centerline and box witnesses.
+    // This is numerical approximation, not exact analytic clipping.
     inline std::pair<Vec3f, Vec3f> ClosestSegmentBoxPoints(
         const CapsuleSegment& capsule,
         const OrientedBoxFrame& box)
@@ -267,6 +285,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // If a sphere center lies inside an oriented box, ClosestPointOnBox
+    // gives zero direction. Select the box face with the least remaining
+    // interior margin and use its signed axis as an explicit fallback.
+    // This normal choice affects grazing/deep-overlap contact stability.
     inline Vec3f SphereBoxFallbackNormal(
         const OrientedBoxFrame& box,
         const Vec3f& sphereCenter)
@@ -690,6 +712,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Convert a world AABB to a conservative AABB in the mesh collider's
+    // local frame: transform all eight corners by inverse collider pose,
+    // then recompute min/max. Used to query a local-space triangle BVH;
+    // never pass a world box directly as local triangle indices.
     inline AABBf WorldBoundsToColliderLocal(
         const RigidBody& body,
         const Collider& collider,
@@ -712,6 +738,11 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Give a zero-thickness mesh triangle a small authored surface volume
+    // by extruding ±SurfaceThickness/2 along its normal. Construct a
+    // six-vertex closed triangular prism so CollideConvex can support-map it.
+    // Mesh-vs-convex physics here is approximate, not exact infinitesimal
+    // triangle collision or soft-body self-intersection.
     inline ConvexHullCollider MakeTriangleCollisionPrism(
         const TriangleMeshCollider& mesh,
         std::size_t triangleIndex)
@@ -735,6 +766,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // A triangulated mesh may query finite support-mapped peer shapes, but
+    // planes and another triangle mesh use separate dispatch paths.
+    // This is a type policy only; activity, dimensions and correctness of
+    // collision geometry are validated by other functions.
     inline bool IsTriangleMeshConvexPeer(const Collider& collider) noexcept
     {
         return !std::holds_alternative<PlaneCollider>(collider.Shape) &&
