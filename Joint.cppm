@@ -8,6 +8,11 @@ module;
 #include <variant>
 #include <vector>
 
+// TEACHING JOINT MODULE: a Joint stores two BodyID references and a variant
+// of local anchor/axis constraints; PhysicsWorld owns the authoritative
+// JointID slots, SolverIsland schedules velocity/position iterations, and
+// PhysicsMath supplies impulse-at-point / inertia operations. Nothing here
+// owns a body or a render object. See docs/JOINT_CONSTRAINTS_LAB.md.
 export module Kairo.Foundation.PhysicsEngine.Joint;
 
 import Kairo.Foundation.Math.Vector;
@@ -24,6 +29,9 @@ export namespace kairo::foundation::physics
     using JointID = std::uint32_t;
     inline constexpr JointID InvalidJointID = std::numeric_limits<JointID>::max();
 
+    // Distance constraint: keep |worldAnchorB-worldAnchorA| at RestLength.
+    // Local anchor positions live in the respective body frames, not the
+    // global world space; rotation is applied on every solver iteration.
     struct DistanceJoint final
     {
         Vec3f LocalAnchorA = Vec3f::Zero();
@@ -31,12 +39,16 @@ export namespace kairo::foundation::physics
         float RestLength = 0.0f;
     };
 
+    // Three translational constraints: both world anchors should coincide.
+    // Relative body orientation is unconstrained; this is NOT a weld joint.
     struct BallSocketJoint final
     {
         Vec3f LocalAnchorA = Vec3f::Zero();
         Vec3f LocalAnchorB = Vec3f::Zero();
     };
 
+    // Three point constraints + three angular constraints: preserve the
+    // reference body-B rotation relative to body-A, not merely their origins.
     struct FixedJoint final
     {
         Vec3f LocalAnchorA = Vec3f::Zero();
@@ -44,6 +56,9 @@ export namespace kairo::foundation::physics
         Quaternionf ReferenceRotation = Quaternionf::Identity();
     };
 
+    // Three anchor constraints + two angular axis-alignment constraints:
+    // rotation about the shared axis remains free. No motor, spring or
+    // angular limit is provided by this variant.
     struct HingeJoint final
     {
         Vec3f LocalAnchorA = Vec3f::Zero();
@@ -55,6 +70,9 @@ export namespace kairo::foundation::physics
     using JointConstraint =
         std::variant<DistanceJoint, BallSocketJoint, FixedJoint, HingeJoint>;
 
+    // Stable identity and a tagged constraint. CollideConnected controls
+    // whether the attached bodies may collide; it does not directly apply
+    // impulses. PhysicsWorld controls active slots and response filtering.
     struct Joint final
     {
         JointID ID = InvalidJointID;
@@ -66,6 +84,9 @@ export namespace kairo::foundation::physics
     };
 
     [[nodiscard]]
+    // Structural fast check for active and distinct valid ID handles. This
+    // does NOT prove BodyA/BodyB exist in a given PhysicsWorld vector; both
+    // solver entrypoints separately check those indices and body activity.
     inline bool IsActiveJoint(const Joint& joint) noexcept
     {
         return joint.Active &&
@@ -76,6 +97,9 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Validate finite local anchors and nonnegative rest length, then
+    // return an owned Joint value. PhysicsWorld checks referenced body IDs
+    // before storing it in the authoritative joint table.
     inline Joint MakeDistanceJoint(
         JointID id,
         BodyID bodyA,
@@ -93,6 +117,8 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Construct a coincident-anchor constraint from body-local offsets.
+    // WorldJointAnchor rotates these offsets every step as bodies move.
     inline Joint MakeBallSocketJoint(
         JointID id,
         BodyID bodyA,
@@ -108,6 +134,8 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Record two local anchors and a normalized reference quaternion.
+    // During solving, the expected B orientation is A*ReferenceRotation.
     inline Joint MakeFixedJoint(
         JointID id,
         BodyID bodyA,
@@ -124,6 +152,9 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Reject zero axes, normalize each local axis and store body-local
+    // anchors. The later hinge solver suppresses angular relative motion
+    // in the two directions perpendicular to the common world hinge axis.
     inline Joint MakeHingeJoint(
         JointID id,
         BodyID bodyA,
@@ -153,6 +184,9 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Convert one local anchor to world coordinates: x_world = bodyPosition
+    // + Rotate(bodyRotation,x_local). This must happen after pose changes;
+    // caching a once-computed world point breaks articulated motion.
     inline Vec3f WorldJointAnchor(
         const RigidBody& body,
         const Vec3f& localAnchor)
@@ -161,6 +195,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Compute B's rotation relative to the desired B = A*reference.
+    // Quaternion short-arc convention flips negative-w error, converts the
+    // orientation error into world-space axis*angle (radians), and handles
+    // vanishing sine-half-angle without dividing by zero.
     inline Vec3f FixedJointAngularError(
         const RigidBody& bodyA,
         const RigidBody& bodyB,
@@ -189,6 +227,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Quaternion-independent hinge axis error: cross(a,b) gives the
+    // correction axis; atan2(|cross|,dot) gives signed minimal magnitude.
+    // Antiparallel axes need a deterministic perpendicular fallback axis
+    // because their cross product is zero despite a 180-degree mismatch.
     inline Vec3f AxisAlignmentError(
         const Vec3f& axisA,
         const Vec3f& axisB)
@@ -214,11 +256,22 @@ export namespace kairo::foundation::physics
     namespace joint_detail
     {
         [[nodiscard]]
+        // Non-dynamic bodies are fixed in the joint response even if a
+        // MassProperties record carries a numeric inverse mass. Static and
+        // kinematic anchors therefore contribute zero linear mobility.
         inline float DynamicInverseMass(const RigidBody& body) noexcept
         {
             return IsDynamic(body) ? body.Mass.InverseMass : 0.0f;
         }
 
+        // One scalar velocity-level Jacobian row along world unit axis n.
+        // PhysicsMath::ContactNormalDenominator includes linear inverse
+        // mass plus the angular r×n lever-arm terms at both anchors.
+        // Relative speed is dot(vB(anchorB)-vA(anchorA),n).
+        // Bias = clamp(beta*positionError/dt, ±maxCorrection/dt);
+        // impulseScalar = -(relativeSpeed+bias)/denominator.
+        // Apply opposite point impulses to dynamic bodies only. This is a
+        // bilateral joint row (negative as well as positive lambda allowed).
         inline void ApplyLinearAxisConstraint(
             RigidBody& bodyA,
             RigidBody& bodyB,
@@ -268,6 +321,9 @@ export namespace kairo::foundation::physics
             }
         }
 
+        // Enforce coincidence of anchors with X/Y/Z world-axis rows.
+        // Each row is solved sequentially using already-modified velocities,
+        // not by a simultaneous 3×3 matrix inversion.
         inline void ApplyPointConstraint(
             RigidBody& bodyA,
             RigidBody& bodyB,
@@ -285,6 +341,10 @@ export namespace kairo::foundation::physics
                 Vec3f::UnitZ(), error.z, settings, dt);
         }
 
+        // Angular-only Jacobian row. Effective denominator is
+        // dot(n,IA^-1*n + IB^-1*n); relative angular speed is
+        // dot(omegaB-omegaA,n). Bias is clamped at ±20 radians/second;
+        // apply opposite angular impulses to dynamic bodies only.
         inline void ApplyAngularAxisConstraint(
             RigidBody& bodyA,
             RigidBody& bodyB,
@@ -323,6 +383,9 @@ export namespace kairo::foundation::physics
             }
         }
 
+        // Approximate the 3-component orientation error with sequential
+        // world X/Y/Z angular rows; a welded orientation is constrained on
+        // all axes, unlike the two perpendicular rows used by a hinge.
         inline void ApplyAngularVectorConstraint(
             RigidBody& bodyA,
             RigidBody& bodyB,
@@ -335,6 +398,10 @@ export namespace kairo::foundation::physics
             ApplyAngularAxisConstraint(bodyA, bodyB, Vec3f::UnitZ(), error.z, settings, dt);
         }
 
+        // Positional projection AFTER velocity iterations. Limit correction
+        // length to MaxPositionCorrection, divide by PositionIterations,
+        // then distribute opposite translations according to inverse masses.
+        // Static and kinematic bodies remain unmoved by projection.
         inline void CorrectLinearError(
             RigidBody& bodyA,
             RigidBody& bodyB,
@@ -367,6 +434,9 @@ export namespace kairo::foundation::physics
             }
         }
 
+        // Compose an axis-angle correction into a dynamic body's rotation,
+        // normalize the quaternion to limit drift, and leave fixed anchors
+        // untouched. This edits pose directly rather than angular velocity.
         inline void ApplyOrientationDelta(
             RigidBody& body,
             const Vec3f& rotationVector)
@@ -384,6 +454,11 @@ export namespace kairo::foundation::physics
             body.State.Rotation = (delta * body.State.Rotation).Normalized();
         }
 
+        // Cap the axis-angle correction at 0.25 rad per outer iteration,
+        // divide among PositionIterations and the two bodies proportional
+        // to inverse-angular-inertia mobility along the correction axis.
+        // The two rotations are opposite. This is a split positional
+        // stabilization step, not a symplectic angular integration scheme.
         inline void CorrectAngularError(
             RigidBody& bodyA,
             RigidBody& bodyB,
@@ -415,6 +490,12 @@ export namespace kairo::foundation::physics
         }
     }
 
+    // Polymorphic joint solver invoked through SolverIsland::SolveIslandVelocity:
+    // distance -> one radial row; ball socket -> three anchor rows; fixed
+    // -> those three plus three rotation rows; hinge -> anchor rows plus
+    // two perpendicular-axis alignment rows (free spin about hinge axis).
+    // Skip inactive/out-of-range or immovable pairs. This solver stores no
+    // persistent per-joint impulse cache, unlike cached contact warm starts.
     inline void SolveJointVelocity(
         std::vector<RigidBody>& bodies,
         Joint& joint,
@@ -494,6 +575,10 @@ export namespace kairo::foundation::physics
             bodyA, bodyB, tangentB, Dot(error, tangentB), settings, dt);
     }
 
+    // Post-velocity stabilization invoked by CorrectIslandPositions.
+    // Recompute world anchors and alignment from current body poses, then
+    // project position/orientation error with bounded per-iteration edits.
+    // This is a separate phase from SolveJointVelocity and from CCD.
     inline void CorrectJointPosition(
         std::vector<RigidBody>& bodies,
         const Joint& joint,
