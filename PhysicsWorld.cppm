@@ -778,6 +778,15 @@ export namespace kairo::foundation::physics
                 worldPoint);
         }
 
+        /// Advance exactly one caller-supplied timestep. The live data flow:
+        /// forces/kinematic velocity -> candidate pairs -> narrow contacts ->
+        /// collision response/event policy -> dynamic-body solver islands ->
+        /// restored impulses and iterative solving -> position correction ->
+        /// CCD-aware motion, sleeping, and callback notification.
+        ///
+        /// World owns authoritative body/collider/joint arrays; its
+        /// broadphase holds only spatial proxies. StepGuard protects against
+        /// callback-driven recursive steps, even when exceptions occur.
         void Step(
             float dt)
         {
@@ -799,12 +808,16 @@ export namespace kairo::foundation::physics
             ValidateStepSettings(Settings, dt);
             RequireFinite(Gravity, "Gravity");
 
+            // Integrate force/torque effects into velocities now; dynamic
+            // body positions are advanced after contact solving.
             IntegrateForces(dt);
             IntegrateKinematicVelocities(dt);
 
             const auto broadphaseStart =
                 std::chrono::steady_clock::now();
 
+            // Refresh finite/infinite proxies from authoritative arrays.
+            // Tree overlap does not yet imply physical contact.
             m_Broadphase.Sync(m_Bodies, m_Colliders);
             m_LastPairs =
                 m_Broadphase.ComputePairs(m_Bodies, m_Colliders);
@@ -815,9 +828,13 @@ export namespace kairo::foundation::physics
             const auto narrowphaseStart =
                 broadphaseEnd;
 
+            // Narrowphase tests candidate shape pairs. Its mesh/prism
+            // contact paths include geometric approximations.
             m_LastContacts =
                 ComputeContacts(m_Bodies, m_Colliders, m_LastPairs);
 
+            // Shape contact and gameplay response are separate concerns.
+            // Per-pair/layer policy and Begin/Stay/End transitions follow.
             ApplyCollisionResponses();
             UpdateContactEvents();
             // Dispatch only once all solver arrays and profiling have finished.
@@ -825,6 +842,8 @@ export namespace kairo::foundation::physics
             // live contact/body/joint storage.
             WakeContactBodies();
             WakeJointBodies();
+            // Partition dynamic bodies connected by contacts or joints;
+            // each island references current contact/joint arrays.
             m_LastIslands = BuildSolverIslands(m_Bodies, m_LastContacts, m_Joints);
 
             const auto narrowphaseEnd =
@@ -833,6 +852,8 @@ export namespace kairo::foundation::physics
             const auto solverStart =
                 narrowphaseEnd;
 
+            // Restore scalar impulses from prior matching contacts so
+            // existing resting contacts can converge in fewer iterations.
             RestoreContactCache();
             WarmStartContacts(m_Bodies, m_Colliders, m_LastContacts);
 
@@ -845,6 +866,8 @@ export namespace kairo::foundation::physics
                 Settings,
                 dt);
 
+            // Save newly accumulated impulses for subsequent warm starts.
+            // Position error correction follows as a separate pass.
             StoreContactCache();
 
             CorrectSolverIslandPositions(
@@ -857,6 +880,8 @@ export namespace kairo::foundation::physics
             const auto solverEnd =
                 std::chrono::steady_clock::now();
 
+            // Integrate resolved velocities into pose, optionally clipping
+            // supported continuous motion at an estimated impact time.
             IntegrateDynamicVelocitiesWithCCD(dt);
             UpdateSleeping(dt);
             ClearForceAccumulators();
@@ -871,6 +896,8 @@ export namespace kairo::foundation::physics
                 ElapsedMilliseconds(narrowphaseStart, narrowphaseEnd),
                 ElapsedMilliseconds(solverStart, solverEnd)
             };
+            // Notify user code only after solver state, caches and timing
+            // profile have been finalized; callbacks may edit world topology.
             DispatchContactEvents();
         }
 
@@ -909,6 +936,9 @@ export namespace kairo::foundation::physics
                 ++steps;
             }
 
+            // Catch-up cap: discard excess simulated elapsed time rather
+            // than building an unbounded backlog when frames run slowly.
+            // This preserves responsiveness, not wall-clock time fidelity.
             if (steps == maxSubSteps && m_FixedAccumulator >= fixedDt)
             {
                 m_FixedAccumulator = 0.0f;
