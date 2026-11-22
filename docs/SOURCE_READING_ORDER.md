@@ -14,6 +14,8 @@ Start with IDs and colliders; follow a time step through broadphase, narrowphase
 
 Read each phase in order. Every link goes to a source file or directory in this repository. For a directory, inspect its public interface and then its implementation files. After each phase, identify the caller, the state it owns, the inputs it validates, and its observable outputs.
 
+**Extended source exercise:** [Trace BodyID and ColliderID lifetime, one full Step, trigger Begin/Stay/End, warm-started contacts, snapshot restore and continuous-impact limits](BODY_CONTACT_EVENT_AND_CCD_LIFECYCLE_LAB.md). Distinguish the PhysicsWorld fixed-step backlog policy from the Player adapter.
+
 ## 1. Build, entry point and state identity
 
 1. [`CMakeLists.txt`](../CMakeLists.txt): configure modules, dependencies and tests.
