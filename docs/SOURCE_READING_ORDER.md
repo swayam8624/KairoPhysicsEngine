@@ -8,41 +8,65 @@ Start with IDs and colliders; follow a time step through broadphase, narrowphase
 
 Read each phase in order. Every link goes to a source file or directory in this repository. For a directory, inspect its public interface and then its implementation files. After each phase, identify the caller, the state it owns, the inputs it validates, and its observable outputs.
 
-## 1. Basic types
+## 1. Build, entry point and state identity
 
-1. [`README.md`](../README.md)
-2. [`PhysicsEngineTypes.cppm`](../PhysicsEngineTypes.cppm)
-3. [`RigidBody.cppm`](../RigidBody.cppm)
-4. [`Collider.cppm`](../Collider.cppm)
-5. [`PhysicsMaterial.cppm`](../PhysicsMaterial.cppm)
+1. [`CMakeLists.txt`](../CMakeLists.txt): configure modules, dependencies and tests.
+2. [`KairoPhysicsEngine.cppm`](../KairoPhysicsEngine.cppm): umbrella interface; exports are not a call sequence.
+3. [`PhysicsEngineTypes.cppm`](../PhysicsEngineTypes.cppm): entity IDs, enums and shared policies.
+4. [`RigidBody.cppm`](../RigidBody.cppm): body motion state, mass/inertia and active/inactive behavior.
+5. [`Collider.cppm`](../Collider.cppm): shapes, local offsets, material/filter and ownership.
+6. [`PhysicsMaterial.cppm`](../PhysicsMaterial.cppm): restitution and friction input contracts.
 
-## 2. One simulation step
+**Trace:** an identity for a body need not identify one collider: one body
+can own multiple shapes. Check deletion/inactive records before indexing
+and distinguish body-local from world-space quantities.
 
-1. [`Broadphase.cppm`](../Broadphase.cppm)
-2. [`Narrowphase.cppm`](../Narrowphase.cppm)
-3. [`ConvexCollision.cppm`](../ConvexCollision.cppm)
-4. [`ContactSolver.cppm`](../ContactSolver.cppm)
-5. [`SolverIsland.cppm`](../SolverIsland.cppm)
-6. [`Joint.cppm`](../Joint.cppm)
-7. [`PhysicsWorld.cppm`](../PhysicsWorld.cppm)
+## 2. Follow one fixed simulation step
 
-## 3. Gameplay and observability
+7. [`PhysicsWorld.cppm`](../PhysicsWorld.cppm): start with `PhysicsWorld::Step` and trace call order.
+8. [`Broadphase.cppm`](../Broadphase.cppm): finite-collider AABB proxies in KairoSpatial, plus infinite-collider path.
+9. [`Narrowphase.cppm`](../Narrowphase.cppm): test candidate pairs and generate contact data.
+10. [`ConvexCollision.cppm`](../ConvexCollision.cppm): convex query geometry and numerical edge cases.
+11. [`SolverIsland.cppm`](../SolverIsland.cppm): connected constraint groups and solver partitioning.
+12. [`ContactSolver.cppm`](../ContactSolver.cppm): normal/friction responses, bias and cached impulses.
+13. [`Joint.cppm`](../Joint.cppm): joint constraints that share rigid-body solver state.
+14. Return to [`PhysicsWorld.cppm`](../PhysicsWorld.cppm): examine contact events, state update and profiling.
 
-1. [`CharacterController.cppm`](../CharacterController.cppm)
-2. [`VehicleSystem.cppm`](../VehicleSystem.cppm)
-3. [`ProjectileSystem.cppm`](../ProjectileSystem.cppm)
-4. [`Buoyancy.cppm`](../Buoyancy.cppm)
-5. [`PhysicsDebug.cppm`](../PhysicsDebug.cppm)
-6. [`PhysicsReplay.cppm`](../PhysicsReplay.cppm)
-7. [`PhysicsSerialization.cppm`](../PhysicsSerialization.cppm)
+**Trace:** collider changes -> broadphase candidate pair -> geometric contact
+-> constraint row/island -> iterative impulse -> updated velocities and
+contact Begin/Stay/End. Identify when sensors/triggers skip physical response.
+AABB overlap alone does not prove collision; continuous sweep queries
+should not be confused with discrete contact resolution.
 
-## 4. Verification
+## 3. Gameplay systems and observability
 
-1. [`tests/PhysicsEngineTests.cpp`](../tests/PhysicsEngineTests.cpp)
-2. [`tests/PhysicsStressTests.cpp`](../tests/PhysicsStressTests.cpp)
-3. [`tests/CharacterControllerTests.cpp`](../tests/CharacterControllerTests.cpp)
-4. [`tests/VehicleSystemTests.cpp`](../tests/VehicleSystemTests.cpp)
-5. [`sandbox`](../sandbox)
+15. [`CharacterController.cppm`](../CharacterController.cppm): movement against scene geometry and collision responses.
+16. [`VehicleSystem.cppm`](../VehicleSystem.cppm): vehicle controls and forces/contacts.
+17. [`ProjectileSystem.cppm`](../ProjectileSystem.cppm): projectiles and continuous query use.
+18. [`Buoyancy.cppm`](../Buoyancy.cppm): displaced-fluid-related forces and assumptions.
+19. [`PhysicsDebug.cppm`](../PhysicsDebug.cppm): read-only geometric diagnostics.
+20. [`PhysicsReplay.cppm`](../PhysicsReplay.cppm): capture/replay state needed for reproducibility.
+21. [`PhysicsSerialization.cppm`](../PhysicsSerialization.cppm): persistence/version and schema contracts.
+
+**Trace:** distinguish a renderer-facing debug view of state from the
+authoritative simulation state; a saved body pose alone may be insufficient
+to reproduce solver caches and contact event continuity.
+
+## 4. Tests and runnable demonstration
+
+22. [`tests/PhysicsEngineTests.cpp`](../tests/PhysicsEngineTests.cpp): basic state, collision and world behavior.
+23. [`tests/PhysicsStressTests.cpp`](../tests/PhysicsStressTests.cpp): workload and numerical stress cases.
+24. [`tests/CharacterControllerTests.cpp`](../tests/CharacterControllerTests.cpp): controller contracts.
+25. [`tests/VehicleSystemTests.cpp`](../tests/VehicleSystemTests.cpp): vehicle behavior.
+26. [`sandbox/examples/main.cpp`](../sandbox/examples/main.cpp): terminal demo invocation.
+27. [`sandbox/DemoScene.cppm`](../sandbox/DemoScene.cppm): actual scenario setup.
+28. [`sandbox/KairoPhysicsSandbox.cppm`](../sandbox/KairoPhysicsSandbox.cppm): sandbox API and workflow.
+29. [`sandbox/KairoPhysicsGlfwSandbox.cpp`](../sandbox/KairoPhysicsGlfwSandbox.cpp): optional windowed runner.
+30. [`sandbox/PhysicsDebugRenderer.cppm`](../sandbox/PhysicsDebugRenderer.cppm): diagnostics rendering.
+
+**Check:** record which binaries and tests actually ran on the host,
+the compiler configuration, scenario, timestep and output. A readable
+demo is not evidence of a numerically validated solver.
 
 ## End-to-end interaction map
 
