@@ -1,3 +1,18 @@
+// TEACHING MAP: PhysicsWorld restores a contact cache and warm-starts
+// impulses before SolverIsland invokes SolveContactManifold. This module
+// consumes PhysicsMath's ContactNormalDenominator, ApplyImpulseAtPoint and
+// ClampAccumulatedImpulseDelta; PhysicsWorld owns response/event policy.
+//
+// The contact normal points from body A to B and opposite signed impulses
+// preserve pair momentum. Nonnegative accumulated normal impulse prevents
+// a separating contact from pulling objects together. Tangential response
+// is limited by a friction budget, with scalar impulse values cached across
+// fixed steps for faster convergence.
+//
+// This implementation approximates friction: the tangent direction is
+// reconstructed from live velocity and reuses the normal effective-mass
+// denominator. It is not a complete two-tangent friction model. Triggers
+// deliberately produce no solver impulse.
 module;
 
 #include <algorithm>
@@ -76,6 +91,8 @@ export namespace kairo::foundation::physics
         const PhysicsMaterial materialB =
             colliderB ? colliderB->Material : PhysicsMaterial{};
 
+        // Material mixing happens after collider-ID lookup; material
+        // belongs to a collider rather than implicitly to a parent body.
         const float restitution =
             MixRestitution(materialA, materialB);
 
@@ -108,6 +125,9 @@ export namespace kairo::foundation::physics
             const Matrix3f inverseInertiaB =
                 WorldInverseInertia(bodyB);
 
+            // Effective mass includes both inverse mass and angular
+            // leverage (r x n). World-space inverse inertia means that
+            // an off-center contact can change angular velocity.
             const float denominator =
                 ContactNormalDenominator(
                     bodyA.Mass.InverseMass,
@@ -118,6 +138,8 @@ export namespace kairo::foundation::physics
                     rB,
                     normal);
 
+            // Baumgarte turns penetration beyond slop into velocity bias,
+            // clamped by settings. It is stabilization, not CCD.
             const float bias =
                 BaumgarteBias(
                     std::max(point.PenetrationDepth - settings.Slop, 0.0f),
@@ -144,6 +166,9 @@ export namespace kairo::foundation::physics
             const float requestedNormalImpulse =
                 -restitutionScale * biasedNormalVelocity / denominator;
 
+            // Clamp the *accumulated* normal impulse >= 0 and apply only
+            // the difference. This supports warm starts and avoids
+            // unphysical attraction by unilateral contact constraints.
             const float normalImpulseDelta =
                 ClampAccumulatedImpulseDelta(
                     point.NormalImpulse,
@@ -185,6 +210,8 @@ export namespace kairo::foundation::physics
                 VelocityAtPoint(bodyB.State, point.Position) -
                 VelocityAtPoint(bodyA.State, point.Position);
 
+            // Remove the normal component of velocity to obtain the
+            // one-dimensional tangent direction used by this solver.
             const Vec3f tangentVelocity =
                 postRelativeVelocity - normal * Dot(postRelativeVelocity, normal);
 
@@ -199,6 +226,9 @@ export namespace kairo::foundation::physics
                 const Vec3f tangent =
                     tangentVelocity / tangentSpeed;
 
+                // Approximation: reuse normal effective mass instead of
+                // computing tangent effective mass; compare against a
+                // two-tangent implementation for oblique/sliding contacts.
                 const float requestedTangentImpulse =
                     -tangentSpeed / std::max(denominator, 1.0e-6f);
 
@@ -244,6 +274,9 @@ export namespace kairo::foundation::physics
     /// Task: warm start the solver so resting contacts and stacks converge in
     /// fewer iterations. Tangent direction is reconstructed from the current
     /// relative velocity, which keeps the cache compact and deterministic.
+    // PhysicsWorld has restored cached scalar impulse values into the
+    // manifold points. Reapply these to velocities before iteration,
+    // reconstructing the tangent from current relative motion.
     inline void WarmStartContacts(
         std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders,
@@ -345,6 +378,8 @@ export namespace kairo::foundation::physics
     /// Input: bodies, colliders, contacts, settings, and dt.
     /// Output: body velocities modified over multiple solver iterations.
     /// Task: provide a V1 sequential impulse solver without owning the world.
+    // Standalone all-manifold solver helper. PhysicsWorld's current
+    // path partitions into islands and calls SolveContactManifold there.
     inline void SolveContacts(
         std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders,
@@ -365,6 +400,8 @@ export namespace kairo::foundation::physics
     /// Output: body positions nudged apart according to inverse mass.
     /// Task: correct residual overlap after velocity solving without adding
     /// another engine system.
+    // Standalone positional helper. PhysicsWorld uses the island-aware
+    // correction pass, including joints, rather than invoking this path.
     inline void CorrectPositions(
         std::vector<RigidBody>& bodies,
         const std::vector<ContactManifold>& contacts,
