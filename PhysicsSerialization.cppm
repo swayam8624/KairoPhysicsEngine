@@ -15,6 +15,11 @@ module;
 #include <variant>
 #include <vector>
 
+// TEACHING SERIALIZATION: versioned persistent PhysicsWorldSnapshot wire
+// format. PhysicsWorld owns live state and RestoreSnapshot validates it;
+// Replay builds a frame command log around this snapshot representation.
+// A snapshot is NOT just body poses: contact IDs, warm-start impulse cache,
+// joint/filter topology and fixed-step accumulator affect future simulation.
 export module Kairo.Foundation.PhysicsEngine.Serialization;
 
 import Kairo.Foundation.Math.Vector;
@@ -43,6 +48,11 @@ export namespace kairo::foundation::physics
         inline constexpr std::uint32_t MaxRecords = 1'000'000u;
         inline constexpr std::uint32_t MaxShapeElements = 16'000'000u;
 
+        // Little-endian scalar encoder with size/count helpers. Every emitted
+        // value has a fixed field order shared by its Read* twin; Float uses
+        // bit-cast bytes, not textual decimal formatting. Count/Raw check
+        // format bounds, while individual U8/U32 writers append directly:
+        // budget checks need to cover the COMPLETE final buffer too.
         class Writer final
         {
         public:
@@ -83,6 +93,11 @@ export namespace kairo::foundation::physics
             }
         };
 
+        // Cursor into caller-owned input bytes; Require guards short reads,
+        // Count enforces record limits, Magic rejects wrong format, and
+        // RequireEnd rejects trailing junk. Reader does not validate the
+        // *semantic* consistency of body IDs, normals or joint references:
+        // PhysicsWorld::RestoreSnapshot does that before mutating live state.
         class Reader final
         {
         public:
@@ -209,6 +224,9 @@ export namespace kairo::foundation::physics
             }
         }
 
+        // Persist solver iteration counts, slop/bias, island threading and
+        // sleep thresholds so a loaded world retains the same numerical
+        // stepping policy rather than using current default settings.
         inline void WriteSettings(Writer& w, const PhysicsStepSettings& s)
         {
             w.Float(s.GravityScale); w.U32(s.VelocityIterations); w.U32(s.PositionIterations);
@@ -217,6 +235,8 @@ export namespace kairo::foundation::physics
             w.Bool(s.EnableSleeping); w.Float(s.SleepLinearSpeed);
             w.Float(s.SleepAngularSpeed); w.Float(s.SleepTime);
         }
+        // Read exactly the matching solver-setting field sequence; later
+        // ValidateStepSettings rejects nonfinite/invalid decoded values.
         inline PhysicsStepSettings ReadSettings(Reader& r)
         {
             PhysicsStepSettings s;
@@ -241,6 +261,9 @@ export namespace kairo::foundation::physics
         inline MassProperties ReadMass(Reader& r)
         { return { r.Float(), r.Float(), r.Vec3(), r.Mat3(), r.Mat3() }; }
 
+        // Serialize stable BodyID, activity/type, full motion, mass/inertia,
+        // accumulated force/torque, gravity/damping/velocity limits,
+        // collision mode and sleeping state. Omission changes future steps.
         inline void WriteBody(Writer& w, const RigidBody& b)
         {
             w.U32(b.ID); w.Bool(b.Active); WriteBodyType(w, b.Type); WriteMotionState(w, b.State);
@@ -250,6 +273,9 @@ export namespace kairo::foundation::physics
             WriteCCD(w, b.CollisionDetection); w.Bool(b.AllowSleeping); w.Bool(b.Sleeping);
             w.Float(b.SleepTimer);
         }
+        // Reconstruct raw body fields including force and sleep state;
+        // externally supplied IDs are checked against stable vector index
+        // and body physics constraints in RestoreSnapshot, not here.
         inline RigidBody ReadBody(Reader& r)
         {
             RigidBody b;
@@ -269,6 +295,10 @@ export namespace kairo::foundation::physics
         inline PhysicsMaterial ReadMaterial(Reader& r)
         { return { r.Float(), r.Float(), r.Float() }; }
 
+        // Variant tag + shape-specific fields: spheres, capsules, planes,
+        // axis-aligned/oriented boxes, authored convex hull and triangle
+        // mesh. Mesh triangles/vertices have bounded element counts. Any new
+        // variant must update ReadShape and version compatibility policy.
         inline void WriteShape(Writer& w, const ColliderShape& shape)
         {
             std::visit([&](const auto& value)
@@ -303,6 +333,9 @@ export namespace kairo::foundation::physics
                 }
             }, shape);
         }
+        // Decode tagged collider geometry with bounded vertex/triangle
+        // counts. Raw hull faces and transforms still need MakeCollider /
+        // RestoreSnapshot validation to enforce geometric invariants.
         inline ColliderShape ReadShape(Reader& r)
         {
             switch (r.U8())
@@ -352,6 +385,9 @@ export namespace kairo::foundation::physics
             c.LayerMask = r.U32(); return c;
         }
 
+        // Persist stable JointID, body references, collision policy and the
+        // selected distance/ball-socket/fixed/hinge constraint parameters.
+        // Solver-island topology must be rebuilt after restoration.
         inline void WriteJoint(Writer& w, const Joint& joint)
         {
             w.U32(joint.ID); w.Bool(joint.Active); w.U32(joint.BodyA); w.U32(joint.BodyB);
@@ -369,6 +405,9 @@ export namespace kairo::foundation::physics
                 { w.U8(3u); w.Vec3(c.LocalAnchorA); w.Vec3(c.LocalAnchorB); w.Vec3(c.LocalAxisA); w.Vec3(c.LocalAxisB); }
             }, joint.Constraint);
         }
+        // Reconstruct joint variant using strict numeric tags; invalid
+        // tags fail before a world is changed. Anchor/body consistency is
+        // subsequently checked by RestoreSnapshot.
         inline Joint ReadJoint(Reader& r)
         {
             Joint joint;
@@ -389,11 +428,16 @@ export namespace kairo::foundation::physics
         { w.Vec3(p.Position); w.Vec3(p.Normal); w.Float(p.PenetrationDepth); w.Float(p.NormalImpulse); w.Float(p.TangentImpulse); }
         inline ContactPoint ReadContactPoint(Reader& r)
         { return { r.Vec3(), r.Vec3(), r.Float(), r.Float(), r.Float() }; }
+        // Save contact identity, trigger flag and a bounded number of
+        // solver points including cached normal/tangent impulse scalars.
+        // Restored contact history supports warm starts and event continuity.
         inline void WriteManifold(Writer& w, const ContactManifold& m)
         {
             w.U32(m.BodyA); w.U32(m.BodyB); w.U32(m.ColliderA); w.U32(m.ColliderB); w.Bool(m.IsTrigger);
             w.Count(m.Points.size(), 64u); for (const auto& p : m.Points) WriteContactPoint(w, p);
         }
+        // Read <=64 contact points per manifold, preserving exact field
+        // order; semantic validation must reject invalid live identities.
         inline ContactManifold ReadManifold(Reader& r)
         {
             ContactManifold m; m.BodyA = r.U32(); m.BodyB = r.U32();
@@ -403,6 +447,8 @@ export namespace kairo::foundation::physics
             return m;
         }
 
+        // Stat and bound file size before allocating vector; report missing/
+        // short reads rather than returning partially populated snapshots.
         inline std::vector<std::uint8_t> ReadFile(const std::filesystem::path& path)
         {
             std::error_code ec;
@@ -416,6 +462,10 @@ export namespace kairo::foundation::physics
             if (!input && !bytes.empty()) throw std::runtime_error("Failed while reading physics snapshot file.");
             return bytes;
         }
+        // Stage file as .tmp, rename previous file to .bak, then publish.
+        // On rename failure, attempt restoration; errors propagate. Rename
+        // alone does not prove crash durability/fsync or guarantee no stale
+        // sidecars. Fault-injection and permission tests remain important.
         inline void WriteFileRecoverably(const std::filesystem::path& path, const std::vector<std::uint8_t>& bytes)
         {
             const auto temp = std::filesystem::path(path.string() + ".tmp");
@@ -446,6 +496,11 @@ export namespace kairo::foundation::physics
         }
     }
 
+    // Encode magic/version, settings and gravity, bodies/colliders/joints,
+    // prior collision pairs/manifolds/policies, previous contact keys and
+    // cached impulses. Wire order is fixed; changing it needs a version bump.
+    // This writes an input snapshot; it does not validate all external
+    // semantic invariants or execute a physics step.
     [[nodiscard]] inline std::vector<std::uint8_t> SerializePhysicsWorldSnapshot(const PhysicsWorldSnapshot& snapshot)
     {
         using namespace serialization_detail;
@@ -465,6 +520,9 @@ export namespace kairo::foundation::physics
         return std::move(w.Bytes);
     }
 
+    // Verify file magic/version, bounded counts and exact end-of-buffer,
+    // then return an OWNED versioned snapshot. The caller must invoke
+    // PhysicsWorld::RestoreSnapshot to validate cross-record consistency.
     [[nodiscard]] inline PhysicsWorldSnapshot DeserializePhysicsWorldSnapshot(const std::vector<std::uint8_t>& bytes)
     {
         using namespace serialization_detail;
@@ -486,6 +544,9 @@ export namespace kairo::foundation::physics
         r.RequireEnd(); return s;
     }
 
+    // FNV-1a 64-bit hash of the exact serialized snapshot bytes; useful for
+    // same-build deterministic replay regression comparisons, but NOT a
+    // cryptographic integrity tag or portable cross-hardware guarantee.
     [[nodiscard]] inline std::uint64_t PhysicsStateHash(const PhysicsWorldSnapshot& snapshot)
     {
         const auto bytes = SerializePhysicsWorldSnapshot(snapshot);
@@ -493,12 +554,20 @@ export namespace kairo::foundation::physics
         for (const std::uint8_t byte : bytes) { hash ^= byte; hash *= 1099511628211ull; }
         return hash;
     }
+    // Snapshot authoritative state before hashing; wall-clock profiler
+    // timings and host callback function objects are intentionally excluded.
     [[nodiscard]] inline std::uint64_t PhysicsStateHash(const PhysicsWorld& world)
     { return PhysicsStateHash(world.CaptureSnapshot()); }
 
+    // Capture live simulation state, encode it and write with staging/backup.
+    // Saving does not imply that a later load has been verified.
     inline void SavePhysicsWorld(const std::filesystem::path& path, const PhysicsWorld& world)
     { serialization_detail::WriteFileRecoverably(path, SerializePhysicsWorldSnapshot(world.CaptureSnapshot())); }
 
+    // Strong error boundary: read/decode into temporary data, validate a
+    // separate PhysicsWorld by RestoreSnapshot, and only then replace the
+    // destination world. Test asserts destination hash stays unchanged when
+    // the input file is corrupt. Host callback bindings are retained.
     inline void LoadPhysicsWorld(const std::filesystem::path& path, PhysicsWorld& world)
     {
         const PhysicsWorldSnapshot snapshot =
