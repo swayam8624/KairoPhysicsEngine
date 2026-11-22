@@ -1,3 +1,27 @@
+// TEACHING MAP: PhysicsWorld is the integration point of the physics stack.
+// It owns authoritative simulation records and coordinates a fixed step.
+// The imported layers have different responsibilities:
+//   Math/PhysicsMath  -> numerical types, forces, time integration, impulses
+//   Geometry/Spatial -> world bounds, acceleration and broadphase queries
+//   Broadphase       -> possible collider pairs, not verified contacts
+//   Narrowphase      -> actual contact geometry after shape testing
+//   SolverIsland     -> connected constraints/body partitioning
+//   ContactSolver    -> normal/tangent impulses and stabilization
+//   Debug            -> observations rather than simulation authority
+//
+// Follow PhysicsWorld::Step and any helpers it calls, rather than assuming the
+// import sequence equals runtime execution order. Verify where transforms,
+// contact caching and Begin/Stay/End event state are updated.
+// This interface also defines versioned snapshot records: restoring just the
+// visible transform cannot necessarily restore warm-start solver continuity.
+// The contact event and hit records use both BodyID and ColliderID because
+// one body can own several colliders with different material/trigger settings.
+//
+// Timing values in PhysicsStepProfile are wall-clock diagnostics. They are not
+// deterministic simulation state and must not be compared across different
+// workloads or hardware without a controlled benchmark protocol.
+// See docs/SOURCE_READING_ORDER.md and tests/PhysicsEngineTests.cpp.
+
 module;
 
 #include <algorithm>
