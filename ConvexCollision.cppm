@@ -13,6 +13,10 @@ module;
 #include <variant>
 #include <vector>
 
+// TEACHING: finite convex shape queries are support maps, not mesh rendering.
+// Narrowphase::CollidePair calls CollideConvex for supported shape pairs;
+// PhysicsWorld owns pair/body/collider identity and solver response policy.
+// Keep witness points in world space and normal orientation consistent.
 export module Kairo.Foundation.PhysicsEngine.ConvexCollision;
 
 import Kairo.Foundation.Math.Vector;
@@ -39,6 +43,9 @@ export namespace kairo::foundation::physics
         std::array<ConvexSupportVertex, 4> Points{};
         std::size_t Count = 0u;
 
+        // Keep newest support first (index zero), shift older simplex
+        // vertices, cap at four for a 3D tetrahedron. World-space witnesses
+        // must shift together with each Minkowski difference point.
         void PushFront(const ConvexSupportVertex& point)
         {
             for (std::size_t index = std::min(Count, Points.size() - 1u);
@@ -58,6 +65,10 @@ export namespace kairo::foundation::physics
         std::uint32_t EPAIterations = 0u;
     };
 
+    // Find argmax dot(worldPoint,direction) for one finite convex shape:
+    // sphere along normalized direction, capsule endpoint + radius, box
+    // extrema along axes, or most-projected rotated hull vertex.
+    // Infinite planes have no finite support and deliberately throw.
     [[nodiscard]] inline Vec3f ConvexShapeSupport(
         const RigidBody& body,
         const Collider& collider,
@@ -122,6 +133,9 @@ export namespace kairo::foundation::physics
             "Infinite planes do not provide finite convex support points.");
     }
 
+    // Support(A-B,d)=Support(A,d)-Support(B,-d). Store both witnesses
+    // so EPA can reconstruct a physical contact point rather than only
+    // a penetration vector in Minkowski space.
     [[nodiscard]] inline ConvexSupportVertex ConvexMinkowskiSupport(
         const RigidBody& bodyA,
         const Collider& colliderA,
@@ -134,6 +148,9 @@ export namespace kairo::foundation::physics
         return { pointA - pointB, pointA, pointB };
     }
 
+    // Classify point projection into vertex, edge and interior Voronoi
+    // regions. Barycentric interior interpolation provides the closest
+    // triangle point; used for convex-hull distance/sphere-sweep queries.
     [[nodiscard]] inline Vec3f ClosestPointOnConvexTriangle(
         const Vec3f& point,
         const Vec3f& a,
@@ -180,6 +197,10 @@ export namespace kairo::foundation::physics
     /// Output: nearest nonnegative surface distance and outward normal.
     /// Task: clip the ray against every outward hull half-space; this is exact
     /// for the authored convex polytope and does not fall back to its AABB.
+    // Clip one ray against all outward-facing polytope half-spaces.
+    // Track entering and exiting parametric distances, rejecting an empty
+    // interval. A parallel ray outside any face cannot hit the hull.
+    // This relies on validated convex faces and consistent winding.
     [[nodiscard]] inline bool RaycastConvexHull(
         const RigidBody& body,
         const Collider& collider,
@@ -231,6 +252,10 @@ export namespace kairo::foundation::physics
     /// to the triangulated boundary plus an outward direction from hull to
     /// point; points inside return zero and the nearest face normal. Task:
     /// support conservative sphere sweeps against convex colliders.
+    // Distinguish a point inside every hull half-space (distance zero)
+    // from one outside: take minimum squared distance to triangulated
+    // faces and point away from closest boundary. PhysicsWorld's sphere
+    // sweep consumes this as geometry, not a contact-solver impulse.
     [[nodiscard]] inline float PointConvexHullSeparation(
         const RigidBody& body,
         const Collider& collider,
@@ -283,6 +308,8 @@ export namespace kairo::foundation::physics
     {
         constexpr float DirectionEpsilonSq = 1.0e-14f;
 
+        // Strict positive projection: does the candidate direction point
+        // toward the origin region relevant to this simplex branch?
         [[nodiscard]] inline bool SameDirection(
             const Vec3f& direction,
             const Vec3f& toward) noexcept
@@ -290,6 +317,8 @@ export namespace kairo::foundation::physics
             return Dot(direction, toward) > 0.0f;
         }
 
+        // Choose a nonparallel reference axis and cross it with a segment;
+        // avoids a zero search vector in near-degenerate GJK geometry.
         [[nodiscard]] inline Vec3f Perpendicular(const Vec3f& vector)
         {
             const Vec3f axis = std::abs(vector.x) < std::abs(vector.y)
@@ -300,6 +329,8 @@ export namespace kairo::foundation::physics
             return SafeNormalize(Cross(vector, axis), Vec3f::UnitX());
         }
 
+        // (edge x toward) x edge is perpendicular to edge toward origin.
+        // Tiny magnitude falls back to a stable perpendicular direction.
         [[nodiscard]] inline Vec3f TripleCrossDirection(
             const Vec3f& edge,
             const Vec3f& toward)
@@ -309,6 +340,9 @@ export namespace kairo::foundation::physics
                 ? result : Perpendicular(edge);
         }
 
+        // Given latest simplex edge AB, keep AB only when origin projects
+        // toward it; otherwise drop B and search from A. Return true only
+        // for the implementation's near-zero search-direction condition.
         inline bool HandleLine(ConvexSimplex& simplex, Vec3f& direction)
         {
             const Vec3f a = simplex.Points[0].Difference;
@@ -325,6 +359,9 @@ export namespace kairo::foundation::physics
             return direction.LengthSquared() <= DirectionEpsilonSq;
         }
 
+        // Test origin against triangle edge/face Voronoi regions, reduce
+        // simplex to the relevant edge if necessary, and orient face normal
+        // toward origin. Reordering vertices changes the face's normal sign.
         inline bool HandleTriangle(ConvexSimplex& simplex, Vec3f& direction)
         {
             const auto a = simplex.Points[0];
@@ -370,6 +407,9 @@ export namespace kairo::foundation::physics
             return direction.LengthSquared() <= DirectionEpsilonSq;
         }
 
+        // Orient a tetrahedron face AWAY from its opposite vertex; if
+        // origin lies outside that face, retain the triangle and continue
+        // GJK. This protects against incorrectly declaring overlap.
         inline bool TestTetrahedronFace(
             ConvexSimplex& simplex,
             const ConvexSupportVertex& a,
@@ -396,6 +436,8 @@ export namespace kairo::foundation::physics
             return true;
         }
 
+        // Try the three faces adjacent to newest vertex; if origin is not
+        // outside any, the simplex encloses origin and GJK may proceed to EPA.
         inline bool HandleTetrahedron(ConvexSimplex& simplex, Vec3f& direction)
         {
             const auto a = simplex.Points[0];
@@ -410,6 +452,9 @@ export namespace kairo::foundation::physics
             return true;
         }
 
+        // Dispatch simplex cardinality 1/2/3/4 to corresponding origin
+        // containment update. The caller must treat a degenerate direction
+        // differently from a full tetrahedron intersection.
         inline bool UpdateSimplex(ConvexSimplex& simplex, Vec3f& direction)
         {
             if (simplex.Count == 2u) return HandleLine(simplex, direction);
@@ -426,6 +471,9 @@ export namespace kairo::foundation::physics
             float Distance = 0.0f;
         };
 
+        // Construct an EPA triangular face with consistent outward normal
+        // and nonnegative signed origin distance. Degenerate area returns
+        // nullopt instead of an invalid normal.
         [[nodiscard]] inline std::optional<EPAFace> MakeFace(
             const std::vector<ConvexSupportVertex>& vertices,
             std::uint32_t first,
@@ -447,6 +495,9 @@ export namespace kairo::foundation::physics
             return EPAFace{ { first, second, third }, normal, distance };
         }
 
+        // Solve triangle barycentric coordinates for the closest EPA face;
+        // these weights reconstruct A and B witness positions separately.
+        // Near-zero denominator falls back to the first vertex.
         [[nodiscard]] inline std::array<float, 3> Barycentric(
             const Vec3f& point,
             const Vec3f& a,
@@ -469,6 +520,9 @@ export namespace kairo::foundation::physics
             return { 1.0f - v - w, v, w };
         }
 
+        // EPA visible-face removal builds a silhouette: reverse-directed
+        // edges cancel as internal edges, leaving only horizon boundary
+        // edges to connect to the newly discovered support vertex.
         inline void AddBoundaryEdge(
             std::vector<std::pair<std::uint32_t, std::uint32_t>>& edges,
             std::uint32_t first,
@@ -486,6 +540,14 @@ export namespace kairo::foundation::physics
     /// value when separated/degenerate. Task: use GJK for intersection and EPA
     /// for penetration without depending on render topology or allocation in
     /// the hot support operation. Iteration caps make failure deterministic.
+    // GJK searches Minkowski support points for tetrahedral origin
+    // containment (bounded iterations and duplicate-support escape).
+    // EPA then expands the polytope toward its closest face, terminating
+    // on sufficiently small support-distance improvement. The returned
+    // penetration contains A->B-oriented normal, depth, midpoint of
+    // reconstructed witnesses and iteration counts. nullopt can mean
+    // separation OR numerical degeneracy/iteration exhaustion; don't
+    // conflate it with an exact certificate of non-overlap.
     [[nodiscard]] inline std::optional<ConvexPenetration> CollideConvex(
         const RigidBody& bodyA,
         const Collider& colliderA,
