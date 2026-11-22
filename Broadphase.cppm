@@ -67,6 +67,9 @@ export namespace kairo::foundation::physics
     {
     public:
         /// TEACHING METHOD: Rebuilds this spatial cache from empty state; PhysicsWorld owns the actual collider data.
+        // Reinitializing the tree invalidates every SpatialIndex proxy.
+        // Clear the parallel ID->proxy table and infinite list together;
+        // retaining a previous handle after Clear would index a new tree.
         void Clear()
         {
             m_Tree = spatial::DynamicAABBTree{};
@@ -80,6 +83,10 @@ export namespace kairo::foundation::physics
             const std::vector<RigidBody>& bodies,
             const Collider& collider)
         {
+            // PhysicsWorld's ColliderID is a stable array-slot identity;
+            // the tree's SpatialIndex is only a transient cache handle.
+            // Make room for the ID before any lookup, even for disabled
+            // colliders, so subsequent removal is idempotent.
             EnsureProxy(collider.ID);
 
             BroadphaseProxy& proxy =
@@ -96,6 +103,9 @@ export namespace kairo::foundation::physics
             const std::uint32_t categoryMask =
                 BroadphaseCategoryMask(collider);
 
+            // A plane has no finite, conservative AABB. Move it out of
+            // the tree *before* recording its infinite-list identity so
+            // finite-vs-infinite queries still see it exactly once.
             if (IsInfiniteCollider(collider))
             {
                 if (proxy.InTree)
@@ -114,6 +124,9 @@ export namespace kairo::foundation::physics
             const spatial::SpatialAABB bounds =
                 WorldAABB(bodies.at(collider.Body), collider);
 
+            // Spatial tree Update may retain a fat AABB if the new tight
+            // bounds remain inside it. A changed category mask cannot
+            // reuse that node metadata, so remove/reinsert instead.
             if (proxy.InTree && proxy.CategoryMask == categoryMask)
             {
                 [[maybe_unused]] const bool reinserted =
@@ -141,6 +154,9 @@ export namespace kairo::foundation::physics
 
         /// TEACHING METHOD: Removes indexing metadata and tree proxy for a ColliderID without deleting the physics collider itself.
 
+        // Remove only indexing state. Collider and body arrays remain
+        // owned by PhysicsWorld; a removed/disabled collider may occupy
+        // its old ID slot in that authoritative array.
         void RemoveCollider(
             ColliderID collider)
         {
@@ -163,6 +179,10 @@ export namespace kairo::foundation::physics
 
         /// TEACHING METHOD: Reconciles collider proxies against current PhysicsWorld body/collider arrays before candidate queries.
 
+        // O(number of collider records) reconciliation. This expects
+        // PhysicsWorld's array to retain inactive ID slots; it does not
+        // independently discover IDs erased from a shrunken array.
+        // Query helpers must call/ensure Sync after transform changes.
         void Sync(
             const std::vector<RigidBody>& bodies,
             const std::vector<Collider>& colliders)
@@ -185,6 +205,9 @@ export namespace kairo::foundation::physics
             // DynamicAABBTree owns finite-volume candidate discovery.
             // ShouldPair applies activity, same-body and category/mask rules;
             // the engine's response overrides are applied later.
+            // Tree pairs are candidate AABB overlaps only. ShouldPair
+            // rejects self-body, inactive, and category/mask-incompatible
+            // pairs before the exact shape-dependent Narrowphase call.
             for (const spatial::SpatialPair& pair : m_Tree.ComputePairs())
             {
                 if (ShouldPair(pair.A, pair.B, bodies, colliders))
@@ -196,6 +219,9 @@ export namespace kairo::foundation::physics
             // Infinite planes cannot be represented by a finite AABB.
             // Pair every indexed finite collider with the unbounded list,
             // then canonicalize and deduplicate IDs below.
+            // For F finite proxies and I infinite planes, the extra
+            // pairing work is O(F*I) before filters. Infinite-vs-infinite
+            // pairs are deliberately not generated in this path.
             for (const Collider& collider : colliders)
             {
                 if (collider.ID >= m_Proxies.size() ||
@@ -213,6 +239,9 @@ export namespace kairo::foundation::physics
                 }
             }
 
+            // Canonical (minID,maxID) ordering allows deterministic
+            // deduplication across spatial tree and infinite pair paths.
+            // Narrowphase contact order can then rely on stable pairs.
             SortUnique(pairs);
             return pairs;
         }
@@ -256,6 +285,9 @@ export namespace kairo::foundation::physics
         // Deliberately differs from QueryAABB(): the latter only asks
         // the finite tree, whereas this helper also returns infinite IDs
         // for subsequent shape-specific continuous/overlap queries.
+        // Used by swept-volume/scene queries that must see *planes*
+        // as well as finite tree hits. QueryAABB intentionally omits
+        // planes; it is only a finite-tree query.
         std::vector<ColliderID> QueryAABBCandidates(
             const spatial::SpatialAABB& query,
             std::uint32_t layerMask) const
@@ -286,6 +318,9 @@ export namespace kairo::foundation::physics
         /// explicit candidates because an infinite plane cannot enter an AABB tree.
         /// TEACHING METHOD: Identifies bodies that might meet a ray; the narrowphase/scene query calculates actual intersections.
         [[nodiscard]]
+        // This only reduces possible ray intersections. PhysicsWorld's
+        // RaycastCollider then solves each shape's actual hit distance;
+        // callers must not treat unordered candidate IDs as sorted hits.
         std::vector<ColliderID> RaycastCandidates(
             const spatial::SpatialRay& ray,
             float maxDistance,
@@ -366,6 +401,9 @@ export namespace kairo::foundation::physics
 
             const Collider& ca = colliders.at(a);
             const Collider& cb = colliders.at(b);
+            // Both colliders must have live parent bodies, must not
+            // belong to the *same* body, and must pass mutual filter
+            // masks. Triggers and policy overrides are handled later.
             return IsActiveCollider(ca) &&
                 IsActiveCollider(cb) &&
                 ca.Body < bodies.size() &&
