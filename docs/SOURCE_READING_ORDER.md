@@ -8,6 +8,8 @@ For a narrative explanation of the complete simulation and its mathematical
 and spatial dependencies, read the [collision pipeline walkthrough](COLLISION_PIPELINE_WALKTHROUGH.md).
 It cross-links KairoMath, KairoPhysicsMath, KairoGeometry and KairoSpatial.
 
+**Persistence and restore safety:** [Snapshot file format, state ownership and strong restore safety](PHYSICS_SNAPSHOT_FORMAT_AND_RECOVERY_LAB.md). Covers exact snapshot bytes, double validation, backup/rename and hostile-input exercises.
+
 **Study convex geometry and replay:** [Support maps, GJK/EPA, witness reconstruction and versioned frame-by-frame verification](CONVEX_COLLISION_AND_REPLAY_FROM_FIRST_PRINCIPLES.md). Includes the hand-checkable cube/sphere collision and real Catch2 cases.
 
 **Solve the mathematics while reading:** [Contact impulses, friction, warm starts and solver islands](CONTACT_SOLVER_FROM_EQUATIONS_TO_CODE.md) includes a worked two-mass collision and regression exercises.
