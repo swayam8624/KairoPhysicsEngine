@@ -1,4 +1,17 @@
-// TEACHING MAP: COLLISION CANDIDATE PHASE: PhysicsWorld sends bodies/colliders here; KairoSpatial DynamicAABBTree identifies potential overlapping pairs. Narrowphase computes actual contacts, solver modules resolve constraints, Renderer only visualizes debug geometry. Infinite colliders use a separate path. Candidate pairs are not confirmed collisions.
+// TEACHING MAP: BroadphaseWorld is a *cache* of spatial proxies, not the
+// authoritative owner of RigidBody or Collider. PhysicsWorld calls Sync before
+// ComputePairs; finite colliders live in KairoSpatial::DynamicAABBTree while
+// infinite colliders (for example, planes) use a separate ID list.
+//
+// The dynamic tree returns conservative possible overlaps, not shape contacts.
+// Narrowphase must test geometry, ContactSolver responds to confirmed contacts,
+// and PhysicsWorld applies policy overrides, events, and solver scheduling.
+// SpatialLayerMask/CollisionFiltersAllow reduce candidate work but do not
+// replace PhysicsWorld's richer collision-response rules and callbacks.
+//
+// C++23: `export module` names the interface; imports pull in Math,
+// PhysicsMath, Spatial and collider contracts. See KairoSpatial's
+// DynamicAABBTree.cppm and this repo's PhysicsWorld.cppm/Collider.cppm.
 module;
 
 #include <algorithm>
@@ -39,6 +52,9 @@ export namespace kairo::foundation::physics
             : BroadphasePair{ b, a };
     }
 
+    // This record describes an *index handle*, keyed in m_Proxies by
+    // ColliderID. It does not own collider geometry or body transforms.
+    // An infinite collider deliberately has no valid tree proxy.
     struct BroadphaseProxy final
     {
         spatial::SpatialIndex Proxy = spatial::SpatialInvalidIndex;
@@ -166,6 +182,9 @@ export namespace kairo::foundation::physics
         {
             std::vector<BroadphasePair> pairs;
 
+            // DynamicAABBTree owns finite-volume candidate discovery.
+            // ShouldPair applies activity, same-body and category/mask rules;
+            // the engine's response overrides are applied later.
             for (const spatial::SpatialPair& pair : m_Tree.ComputePairs())
             {
                 if (ShouldPair(pair.A, pair.B, bodies, colliders))
@@ -174,6 +193,9 @@ export namespace kairo::foundation::physics
                 }
             }
 
+            // Infinite planes cannot be represented by a finite AABB.
+            // Pair every indexed finite collider with the unbounded list,
+            // then canonicalize and deduplicate IDs below.
             for (const Collider& collider : colliders)
             {
                 if (collider.ID >= m_Proxies.size() ||
@@ -231,6 +253,9 @@ export namespace kairo::foundation::physics
         /// explicitly because they intentionally have no finite tree proxy.
         /// TEACHING METHOD: Combines finite-tree and infinite-body candidates for broader scene queries.
         [[nodiscard]]
+        // Deliberately differs from QueryAABB(): the latter only asks
+        // the finite tree, whereas this helper also returns infinite IDs
+        // for subsequent shape-specific continuous/overlap queries.
         std::vector<ColliderID> QueryAABBCandidates(
             const spatial::SpatialAABB& query,
             std::uint32_t layerMask) const
@@ -325,6 +350,9 @@ export namespace kairo::foundation::physics
         /// TEACHING METHOD: Applies activity, body and collision-filter rules to suppress irrelevant candidate pairs.
 
         [[nodiscard]]
+        // A passed filter is not a promise of contact, blocking response,
+        // or solver participation. In particular, trigger/event policy and
+        // collision-response overrides live above this cache in PhysicsWorld.
         static bool ShouldPair(
             ColliderID a,
             ColliderID b,
