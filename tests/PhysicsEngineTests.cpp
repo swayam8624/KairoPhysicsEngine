@@ -94,7 +94,7 @@ namespace
 // center-to-origin distance should remain within 0.04 m of the authored 2 m
 // constraint, despite initial velocity. This is approximate iterative
 // stabilization, not an exact algebraic lock.
-// 
+//
 TEST_CASE("Distance joints preserve authored separation",
     "[PhysicsEngine][Joint][Distance]")
 {
@@ -121,7 +121,7 @@ TEST_CASE("Distance joints preserve authored separation",
 // TEACHING TEST: Two different body-local anchors are transformed via WorldJointAnchor
 // after 180 steps. Their world-space separation must be below 0.04 m, while
 // relative orientation is intentionally unconstrained.
-// 
+//
 TEST_CASE("Ball socket joints keep a shared anchor coincident",
     "[PhysicsEngine][Joint][BallSocket]")
 {
@@ -147,7 +147,7 @@ TEST_CASE("Ball socket joints keep a shared anchor coincident",
 // AND angular velocity. After 120 fixed steps, position and
 // quaternion-vector components should remain near the anchored pose. This
 // is a bounded fixture, not arbitrary-load proof.
-// 
+//
 TEST_CASE("Fixed joints preserve relative pose under authored velocity",
     "[PhysicsEngine][Joint][Fixed]")
 {
@@ -177,7 +177,7 @@ TEST_CASE("Fixed joints preserve relative pose under authored velocity",
 // TEACHING TEST: Start with angular speed in world X and Y. Hinge axis Y remains free
 // (speed >1 rad/s), while X and Z are suppressed (magnitude <0.5 rad/s). No
 // motor, stop angle, or angular limit is tested.
-// 
+//
 TEST_CASE("Hinge joints preserve the free axis while constraining orthogonal spin",
     "[PhysicsEngine][Joint][Hinge]")
 {
@@ -205,7 +205,7 @@ TEST_CASE("Hinge joints preserve the free axis while constraining orthogonal spi
 // must remain separate islands; creating a direct DYNAMIC-to-DYNAMIC
 // distance joint joins them into one island. This is the core race-safety
 // partition invariant.
-// 
+//
 TEST_CASE("Solver islands ignore static bridges and merge through dynamic joints",
     "[PhysicsEngine][Island]")
 {
@@ -238,7 +238,7 @@ TEST_CASE("Solver islands ignore static bridges and merge through dynamic joints
 // island dispatch; after 90 steps check positions and velocities agree
 // within 1e-4. Numerical tolerance is not a cross-platform scheduling or
 // thread-sanitizer guarantee.
-// 
+//
 TEST_CASE("Parallel island dispatch matches serial island results",
     "[PhysicsEngine][Island][Parallel]")
 {
