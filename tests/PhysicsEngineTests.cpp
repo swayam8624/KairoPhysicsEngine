@@ -494,6 +494,10 @@ TEST_CASE("Static triangle meshes collide query raycast sweep and debug consiste
     CHECK(found->Faces.size() == 2u);
 }
 
+// TEACHING TEST: MakeCollider is the validation gate before support-map
+// queries; require a closed convex face set, valid vertex indices, no
+// duplicate/unused geometry and no concave deformation. CollideConvex
+// assumes the resulting shape passed this authoring contract.
 TEST_CASE("Convex hull validation normalizes closed topology and rejects invalid input",
     "[PhysicsEngine][Convex][Validation]")
 {
@@ -527,6 +531,11 @@ TEST_CASE("Convex hull validation normalizes closed topology and rejects invalid
         MakeCollider(0, 0, std::move(unusedVertex)), std::invalid_argument);
 }
 
+// TEACHING TEST: a cube half-extent 0.5 plus sphere radius 0.5 at x=0.75
+// overlaps by 0.25 in the +X direction. Repeat identical inputs to compare
+// reported depths/iteration counts, test separated inputs, and reverse a
+// rotated hull pair to verify opposite normals with similar depth.
+// This checks fixtures, not proof of robustness for all degenerate hulls.
 TEST_CASE("GJK and EPA resolve convex penetration deterministically",
     "[PhysicsEngine][Convex][GJK][EPA]")
 {
@@ -569,6 +578,9 @@ TEST_CASE("GJK and EPA resolve convex penetration deterministically",
     CHECK(Dot(hullHull->Normal, reverseHullHull->Normal) < -0.99f);
 }
 
+// TEACHING TEST: the infinite-plane path lives in Narrowphase rather than
+// GJK's finite support map. Swapping collider A/B should reverse the
+// reported manifold normal, preserving solver sign conventions.
 TEST_CASE("Convex narrowphase supports planes pair symmetry and rotated hulls",
     "[PhysicsEngine][Convex][Narrowphase]")
 {
@@ -590,6 +602,10 @@ TEST_CASE("Convex narrowphase supports planes pair symmetry and rotated hulls",
     CHECK(planeHull->Points[0].Normal.y > 0.0f);
 }
 
+// TEACHING TEST: a validated hull participates in PhysicsWorld::Step,
+// raycast distance, a miss/impact sphere sweep and read-only debug mesh.
+// These are DISTINCT paths; one correct GJK overlap does not prove CCD or
+// renderer-debug output correctness without their assertions.
 TEST_CASE("Convex colliders participate in world solving rays sweeps and debug",
     "[PhysicsEngine][Convex][World]")
 {
@@ -2249,6 +2265,10 @@ TEST_CASE("Physics snapshots round-trip deterministic world state",
     CHECK(PhysicsStateHash(restored) == PhysicsStateHash(world));
 }
 
+// TEACHING TEST: a corrupted snapshot file must throw while keeping the
+// target PhysicsWorld's hash unchanged, rather than partially mutating the
+// authoritative body/collider/cache arrays. The tested hash is an evidence
+// check, not a complete dump of all process-owned callbacks.
 TEST_CASE("Physics snapshot file load is strong-exception safe",
     "[PhysicsEngine][Serialization][File]")
 {
@@ -2270,6 +2290,11 @@ TEST_CASE("Physics snapshot file load is strong-exception safe",
     std::error_code ec; std::filesystem::remove(path, ec);
 }
 
+// TEACHING TEST: record 40 fixed steps (force first 10, impulse at 12),
+// serialize/deserialize a command log, restore its initial snapshot and
+// compare every expected state hash. Deliberately corrupt frame 5's hash
+// and require the verification result to identify that first divergence.
+// This is same-host seeded replay evidence, not cross-platform FP parity.
 TEST_CASE("Physics replay reproduces command-driven simulation and detects divergence",
     "[PhysicsEngine][Replay]")
 {
@@ -2307,6 +2332,10 @@ TEST_CASE("Physics replay reproduces command-driven simulation and detects diver
     CHECK(mismatch.ExpectedHash != mismatch.ActualHash);
 }
 
+// TEACHING TEST: malformed byte lengths must not silently decode as a valid
+// snapshot/replay. The snapshot rejects both truncated/trailing bytes;
+// replay truncation is directly exercised here. Follow the binary Reader
+// and version/command-tag bounds for additional hostile input cases.
 TEST_CASE("Physics snapshot and replay parsers reject truncation and trailing data",
     "[PhysicsEngine][Serialization][Validation]")
 {
