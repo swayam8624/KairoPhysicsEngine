@@ -40,6 +40,12 @@ export namespace kairo::foundation::physics
     /// Task: solve one contact manifold with sequential impulses. The contact
     /// points are mutable because commercial solvers cache accumulated normal
     /// and tangent impulse values for warm starting on the next fixed step.
+    // Called inside SolverIsland's velocity-iteration loop. A manifold
+    // contains potentially several witness points, each carrying an
+    // accumulated normal and tangent impulse. Those scalar accumulators
+    // are persisted by PhysicsWorld's contact cache between fixed steps.
+    // World policy has already marked Ignore/Trigger/Block, so trigger
+    // manifolds are valid events but must produce *no* physical impulse.
     inline void SolveContactManifold(
         std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders,
@@ -85,6 +91,9 @@ export namespace kairo::foundation::physics
                 ? &colliders.at(manifold.ColliderB)
                 : nullptr;
 
+        // Material parameters belong to individual colliders: two
+        // shapes attached to one body can still have different friction
+        // or restitution. Resolve them *after* ID and activity checks.
         const PhysicsMaterial materialA =
             colliderA ? colliderA->Material : PhysicsMaterial{};
 
@@ -104,6 +113,9 @@ export namespace kairo::foundation::physics
             const Vec3f normal =
                 SafeNormalize(point.Normal, Vec3f::Up());
 
+            // Lever arm r = contactWorldPosition - centerOfMassWorld.
+            // A force applied at r induces torque r cross impulse,
+            // which is why linear inverse mass alone is insufficient.
             const Vec3f rA =
                 point.Position - bodyA.State.Position;
 
@@ -128,6 +140,10 @@ export namespace kairo::foundation::physics
             // Effective mass includes both inverse mass and angular
             // leverage (r x n). World-space inverse inertia means that
             // an off-center contact can change angular velocity.
+            // The scalar effective-mass denominator is
+            // (mA^-1 + mB^-1) + rotational leverage about the normal.
+            // It converts desired relative normal velocity change into
+            // an impulse magnitude; near-zero means no solvable motion.
             const float denominator =
                 ContactNormalDenominator(
                     bodyA.Mass.InverseMass,
@@ -140,6 +156,10 @@ export namespace kairo::foundation::physics
 
             // Baumgarte turns penetration beyond slop into velocity bias,
             // clamped by settings. It is stabilization, not CCD.
+            // Penetration stabilization inserts an extra velocity
+            // correction proportional to depth beyond tolerance / dt.
+            // Slop avoids jitter for microscopic overlaps; cap keeps
+            // a deep collision from requesting an unbounded correction.
             const float bias =
                 BaumgarteBias(
                     std::max(point.PenetrationDepth - settings.Slop, 0.0f),
@@ -158,6 +178,9 @@ export namespace kairo::foundation::physics
             const float biasedNormalVelocity =
                 normalVelocity + bias;
 
+            // Only approaching/negative biased normal velocity uses the
+            // restitution coefficient. Existing separating contacts
+            // should not receive an extra bounce from this rule.
             const float restitutionScale =
                 biasedNormalVelocity < 0.0f
                     ? (1.0f + restitution)
@@ -169,6 +192,10 @@ export namespace kairo::foundation::physics
             // Clamp the *accumulated* normal impulse >= 0 and apply only
             // the difference. This supports warm starts and avoids
             // unphysical attraction by unilateral contact constraints.
+            // Project old accumulator + requested delta to [0, infinity)
+            // and apply the *difference* to each body. This is a
+            // unilateral complementarity constraint: contact may push
+            // bodies apart but must not glue them together.
             const float normalImpulseDelta =
                 ClampAccumulatedImpulseDelta(
                     point.NormalImpulse,
@@ -178,6 +205,10 @@ export namespace kairo::foundation::physics
 
             point.NormalImpulse += normalImpulseDelta;
 
+            // Implementation detail to test: skipping a tiny normal
+            // change also skips this point's tangent/friction solve.
+            // A more general friction iteration could solve tangential
+            // velocity even when the normal accumulator is unchanged.
             if (std::abs(normalImpulseDelta) <= 1.0e-8f)
             {
                 continue;
@@ -229,9 +260,16 @@ export namespace kairo::foundation::physics
                 // Approximation: reuse normal effective mass instead of
                 // computing tangent effective mass; compare against a
                 // two-tangent implementation for oblique/sliding contacts.
+                    // This V1 uses a *single live sliding direction* and
+                // reuses the normal effective-mass denominator. Exact
+                // two-tangent Coulomb friction requires tangential
+                // effective masses and a persistent tangent basis.
                 const float requestedTangentImpulse =
                     -tangentSpeed / std::max(denominator, 1.0e-6f);
 
+                // Coulomb cone approximated as a scalar interval:
+                // |frictionImpulse| <= dynamicFriction * normalImpulse.
+                // The normal accumulator must already be nonnegative.
                 const float maxTangentImpulse =
                     dynamicFriction * point.NormalImpulse;
 
@@ -277,6 +315,11 @@ export namespace kairo::foundation::physics
     // PhysicsWorld has restored cached scalar impulse values into the
     // manifold points. Reapply these to velocities before iteration,
     // reconstructing the tangent from current relative motion.
+    // PhysicsWorld::RestoreContactCache matches previous witnesses
+    // using pair IDs and local anchors, then writes these accumulators.
+    // Reapply last step's solution before iterative solve to improve
+    // rest/stack convergence. The cached tangent is a scalar only;
+    // rotating sliding directions across steps is an accuracy limit.
     inline void WarmStartContacts(
         std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders,
@@ -380,6 +423,9 @@ export namespace kairo::foundation::physics
     /// Task: provide a V1 sequential impulse solver without owning the world.
     // Standalone all-manifold solver helper. PhysicsWorld's current
     // path partitions into islands and calls SolveContactManifold there.
+    // Reference whole-array iteration, useful for isolated solver
+    // tests. The main Step path calls SolveSolverIslands to partition
+    // bodies and potentially parallelize independent constraint sets.
     inline void SolveContacts(
         std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders,
@@ -402,6 +448,11 @@ export namespace kairo::foundation::physics
     /// another engine system.
     // Standalone positional helper. PhysicsWorld uses the island-aware
     // correction pass, including joints, rather than invoking this path.
+    // Residual penetration fix, distinct from the velocity impulse
+    // pass and *not* a continuous collision check. Each iteration
+    // distributes a bounded correction by inverse mass; a static
+    // body stays fixed while the dynamic body takes the displacement.
+    // PhysicsWorld generally invokes the island-aware correction.
     inline void CorrectPositions(
         std::vector<RigidBody>& bodies,
         const std::vector<ContactManifold>& contacts,
