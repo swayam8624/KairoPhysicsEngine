@@ -227,6 +227,10 @@ export namespace kairo::foundation::physics
         }
 
         [[nodiscard]]
+        // Create a stable vector-index BodyID from the next slot in PhysicsWorld.
+        // Unlike KairoECS generational slots, this world keeps deleted records
+        // inactive rather than recycling their numeric IDs; it is still process-local,
+        // not an authored Scene Entity ID.
         BodyID CreateRigidBody(
             const RigidBodyDesc& desc)
         {
@@ -238,6 +242,10 @@ export namespace kairo::foundation::physics
         }
 
         [[nodiscard]]
+        // A body can own multiple colliders, so ColliderID and BodyID are separate. On
+        // attachment, create the shape record then publish a finite or infinite
+        // broad-phase proxy; runtime collision filtering and material rules belong to
+        // collider identity.
         ColliderID AddCollider(
             BodyID body,
             ColliderShape shape,
@@ -264,6 +272,10 @@ export namespace kairo::foundation::physics
         /// Output: none.
         /// Task: remove the collider from simulation while preserving stable
         /// vector-index ids for debug logs, cached contacts, and user handles.
+        // Deactivate this collider without compacting IDs, remove its
+        // dynamic-tree/infinite proxy and invalidate per-pair rules and persistent
+        // contact cache. A stale ColliderID can be checked for activity but never maps
+        // to a newly inserted shape.
         void RemoveCollider(
             ColliderID collider)
         {
@@ -640,6 +652,9 @@ export namespace kairo::foundation::physics
         /// Task: deactivate a body and every collider attached to it without
         /// compacting storage. This gives users deletion-safe ids: an old id can
         /// be tested with `IsValidBody` and never aliases a future body.
+        // Deactivate all attached shapes and joints before retiring the body. Clear
+        // cached contacts and velocities while preserving index identity so external
+        // handles never silently alias a later body.
         void DestroyRigidBody(
             BodyID body)
         {
@@ -794,6 +809,10 @@ export namespace kairo::foundation::physics
         // poses with CCD; sleep, clear forces and then notify listeners.
         // Input: dt validated against PhysicsStepSettings; outputs mutate
         // world state, contacts/events and the profiling snapshot.
+        // The authoritative fixed-step transaction advances forces, proxy queries,
+        // shape contacts, gameplay response policy, island solver and cached impulses,
+        // then CCD position advance and sleep. Contact listeners run only after world
+        // state/profiling finish; recursive Step is rejected.
         void Step(
             float dt)
         {
@@ -919,6 +938,10 @@ export namespace kairo::foundation::physics
         // from accumulated elapsed time, capped by maxSubSteps. When
         // badly overloaded, the remaining backlog is discarded:
         // responsiveness wins over exact elapsed-time fidelity.
+        // Adapt variable host time into repeated fixed-size Step calls. At the
+        // configured cap this implementation discards the remaining backlog, unlike
+        // Player RuntimePhysicsBridge's fractional-remainder policy; deterministic
+        // per-step physics does not guarantee wall-time catch-up.
         std::uint32_t StepFixed(
             float elapsedTime,
             float fixedDt,
@@ -1278,6 +1301,10 @@ export namespace kairo::foundation::physics
         /// and wall-clock profiling are excluded because they are I/O/diagnostic
         /// bindings rather than simulation state.
         [[nodiscard]]
+        // Capture deterministic solver state beyond body poses: collider/joint
+        // topology, response rules, prior contact keys, warm-start impulse cache and
+        // accumulator. Profiling clocks and host callback function objects are
+        // intentionally excluded.
         PhysicsWorldSnapshot CaptureSnapshot() const
         {
             PhysicsWorldSnapshot snapshot;
@@ -1315,6 +1342,10 @@ export namespace kairo::foundation::physics
         // validate IDs and references first, regenerate active collider
         // metadata, then rebuild spatial proxies/islands and contact cache.
         // Host callback function objects remain outside serialization.
+        // Validate complete saved topology before replacing live state, rebuild
+        // derived collider metadata and spatial proxies, restore cache/event identity,
+        // and keep host callbacks as process-owned bindings. Restoring only visible
+        // positions would change resting contact behavior.
         void RestoreSnapshot(const PhysicsWorldSnapshot& snapshot)
         {
             ValidateSnapshot(snapshot);
@@ -1897,6 +1928,9 @@ export namespace kairo::foundation::physics
         // Shape collision is separate from collision *policy*.
         // Filter ignored and joint-disabled pairs here, then set the
         // final trigger/block mode before event identity and solving.
+        // A true geometric manifold can still be ignored or converted to a Trigger by
+        // joint/pair/layer/gameplay policy. Trigger contacts can generate
+        // Begin/Stay/End events but must never enter impulse-based blocking response.
         void ApplyCollisionResponses()
         {
             std::vector<ContactManifold> filtered;
@@ -1937,6 +1971,10 @@ export namespace kairo::foundation::physics
         // Copy callback and events before calling client code so a
         // listener can reconfigure subscriptions or mutate topology
         // without invalidating the loop. Dispatch happens at Step end.
+        // Copy the callback and event array before invoking external gameplay code, so
+        // listeners may change subscriptions or world topology after the solver has
+        // finished without invalidating event iteration. Nested Step remains
+        // disallowed.
         void DispatchContactEvents()
         {
             if (!m_ContactEventCallback) return;
@@ -2687,6 +2725,9 @@ export namespace kairo::foundation::physics
         // Acceleration = gravity scale + force / mass, and angular
         // acceleration = world inverse inertia * torque. Update only
         // velocities here; positions must wait for constraint solving.
+        // Accumulate gravity, user force and torque into dynamic body velocities;
+        // defer pose integration until contacts/joints have solved, so solver impulses
+        // influence the same step's final movement.
         void IntegrateForces(
             float dt)
         {
@@ -2717,6 +2758,9 @@ export namespace kairo::foundation::physics
         // Kinematic movement follows externally supplied velocity:
         // it participates in contacts but takes no dynamic impulse.
         // Dynamic bodies can still react to a moving kinematic body.
+        // Advance kinematic objects from externally supplied velocity without applying
+        // dynamic inverse-mass impulses to them; moving kinematic colliders may still
+        // affect nearby dynamic bodies through contact constraints.
         void IntegrateKinematicVelocities(
             float dt)
         {
@@ -2789,6 +2833,9 @@ export namespace kairo::foundation::physics
         // At an estimated impact time, remove approaching normal
         // relative speed by a mass-weighted impulse. This is a bounded
         // linear collision response, not a globally exact 6-DOF CCD.
+        // At an estimated continuous impact, cancel approaching normal relative linear
+        // speed using inverse mass and restitution. This bounded response omits a
+        // fully angular manifold solve, so it is not a general rigid-body CCD proof.
         void ApplyContinuousImpactImpulse(
             const ContinuousImpact& impact)
         {
@@ -2849,6 +2896,10 @@ export namespace kairo::foundation::physics
         // to an early TimeOfImpact with safety margins. Other dynamic
         // bodies advance normally. Geometry coverage and TOI tolerances
         // limit how strongly this can prevent tunneling.
+        // For bodies opted into Continuous detection, sweep supported collider
+        // approximations along the proposed velocity displacement and clamp
+        // advancement near TOI; unsupported geometry, tolerances and finite iteration
+        // limits remain possible tunneling risks.
         void IntegrateDynamicVelocitiesWithCCD(
             float dt)
         {
@@ -3137,6 +3188,10 @@ export namespace kairo::foundation::physics
         // Compare canonicalized last/current manifold keys to emit
         // Begin, Stay and End transitions. The events are prepared
         // before solving but published only after the completed step.
+        // Compare canonical current contact keys with previous keys to generate Begin,
+        // Stay and End transitions. Store events during narrowphase response
+        // processing but defer dispatch until after contact solving, CCD and
+        // profiling.
         void UpdateContactEvents()
         {
             std::vector<ContactEventKey> current;
@@ -3307,6 +3362,9 @@ export namespace kairo::foundation::physics
         // Sleep low-velocity dynamic bodies after a dwell interval;
         // new force, fast motion or non-sleepable settings wake them.
         // Sleeping is a solver optimization, not object destruction.
+        // Only low-motion dynamic bodies with no active forces can enter sleep after
+        // sufficient dwell. Sleeping saves solver work but preserves an active body
+        // and collider topology; applied forces/contact wake them.
         void UpdateSleeping(
             float dt)
         {
