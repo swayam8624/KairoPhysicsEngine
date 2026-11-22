@@ -1,3 +1,18 @@
+// TEACHING MAP: This module partitions PhysicsWorld's contacts and joints
+// into disjoint groups of *dynamic* bodies before sequential-impulse solving.
+// The union-find structure merges dynamic bodies connected by a contact/joint;
+// shared static or kinematic anchors do not themselves merge islands.
+//
+// SolverIsland stores indices into the current contact/joint arrays, not
+// independent copies. Do not retain it across topology changes/steps.
+// DispatchIslands may use std::jthread workers; safe parallelism depends on
+// each island writing only its own dynamic bodies/constraints. A new constraint
+// type that mutates shared objects can invalidate that assumption.
+//
+// Dependency flow: PhysicsWorld -> BuildSolverIslands ->
+// SolveIslandVelocity(ContactSolver, Joint) / CorrectIslandPositions ->
+// PhysicsWorld's final integration and event notification. This is neither
+// broadphase nor collision geometry generation.
 module;
 
 #include <algorithm>
@@ -19,6 +34,8 @@ import Kairo.Foundation.PhysicsEngine.Joint;
 
 export namespace kairo::foundation::physics
 {
+    // DynamicBodies is the ownership/partition key for safe per-island
+    // writes. ContactIndices and JointIndices refer to caller-owned arrays.
     struct SolverIsland final
     {
         std::vector<BodyID> DynamicBodies;
@@ -28,6 +45,9 @@ export namespace kairo::foundation::physics
 
     namespace island_detail
     {
+        // Union-find with path compression and union by rank.
+        // Here parent indices correspond to BodyID slots, not pointers.
+        // A collision/joint connects two *dynamic* bodies into an island.
         class DisjointSet final
         {
         public:
@@ -75,6 +95,9 @@ export namespace kairo::foundation::physics
             std::vector<std::uint8_t> m_Rank;
         };
 
+        // Unlike the velocity pass, this is positional stabilization.
+        // Mass-weighted correction reduces interpenetration beyond the slop
+        // threshold. It does not replace geometry update or continuous CCD.
         inline void CorrectContactOnce(
             std::vector<RigidBody>& bodies,
             const ContactManifold& manifold,
@@ -122,6 +145,10 @@ export namespace kairo::foundation::physics
             }
         }
 
+        // Iterate all contacts and then all joints for this island on
+        // each solver pass. This is the inner loop that applies the
+        // PhysicsMath impulse/effective-mass operations via collaborating
+        // ContactSolver and Joint modules.
         inline void SolveIslandVelocity(
             std::vector<RigidBody>& bodies,
             const std::vector<Collider>& colliders,
@@ -169,6 +196,10 @@ export namespace kairo::foundation::physics
         }
 
         template<typename Function>
+        // Worker threads claim independent island indices through an
+        // atomic counter. The vector of jthreads joins at scope exit; each
+        // callback must only mutate data owned by that island. Changing
+        // shared state from callback code would introduce data races.
         inline void DispatchIslands(
             const std::vector<SolverIsland>& islands,
             bool parallel,
@@ -221,6 +252,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Build groups in two passes: first union dynamic/dynamic edges from
+    // non-trigger contacts and active joints, then attach each constraint
+    // to the island containing its dynamic endpoint. Static anchors can
+    // appear in multiple islands because they are not impulse-updated.
     inline std::vector<SolverIsland> BuildSolverIslands(
         const std::vector<RigidBody>& bodies,
         const std::vector<ContactManifold>& contacts,
@@ -321,6 +356,8 @@ export namespace kairo::foundation::physics
         return islands;
     }
 
+    // Main world-facing velocity solve. See PhysicsWorld::Step for the
+    // surrounding warm start, position correction, CCD and sleep phases.
     inline void SolveSolverIslands(
         std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders,
@@ -342,6 +379,8 @@ export namespace kairo::foundation::physics
             });
     }
 
+    // Separate position pass, after velocities/impulse cache have been
+    // updated. Existing manifold depths are reused within this pass.
     inline void CorrectSolverIslandPositions(
         std::vector<RigidBody>& bodies,
         const std::vector<ContactManifold>& contacts,
