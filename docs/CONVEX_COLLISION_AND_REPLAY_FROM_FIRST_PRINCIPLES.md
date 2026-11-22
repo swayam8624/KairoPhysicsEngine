@@ -122,6 +122,41 @@ Why this matters: a GJK/EPA implementation can report overlap with the wrong sig
 
 The separate [narrowphase fixture](../tests/PhysicsEngineTests.cpp) checks rotated convex hull against an infinite plane, which is deliberately outside finite-support GJK. Another world-level fixture checks that the same hull participates in `Step`, `Raycast`, `SweepSphere` and debug geometry. That does not mean each query is implemented through the same algorithm.
 
+### Supplement: boxes and triangle meshes do not all use GJK
+
+The [`Narrowphase.cppm`](../Narrowphase.cppm) code includes specialized shape contact paths. An oriented box (OBB) against another OBB uses the **separating-axis theorem (SAT)**. For an axis `n`, the support radius of an OBB with unit axes `u_i` and half-extents `e_i` is:
+
+```text
+r_box(n) = sum_i abs(dot(n, u_i)) * e_i
+overlap(n) = r_A(n) + r_B(n) - abs(dot(center_B-center_A,n))
+```
+
+When any candidate axis has nonpositive overlap, the boxes separate. A general OBB pair checks up to **15 axes**: three from the first box, three from the second, and nine edge-direction cross products. Tiny cross products are ignored because two nearly parallel edges do not yield a numerically trustworthy normal. The axis of minimum positive overlap suggests a response normal, but a solver also needs contact locations.
+
+[`BuildBoxBoxContacts`](../Narrowphase.cppm) gathers vertices of A inside B and B inside A, shifts witnesses toward the overlap midpoint, removes nearly coincident points, and retains at most four contacts using a deepest-first then farthest-spread selection. If neither box contributes an interior vertex, it uses a fallback pair of support points. That is a practical limited manifold heuristic, **not an exact intersection-polygon clipper**, particularly for edge–edge contacts.
+
+Sphere/box and capsule/box functions first compute a nearest-point pair: `ClosestPointOnBox` projects and clamps onto box axes; `ClosestPointsOnSegments` handles degenerate/parallel axial segments; and `ClosestSegmentBoxPoints` approximates a closest capsule-axis point using a bounded one-dimensional ternary search. When the sphere center is *inside* the OBB, `ClosestPointOnBox` returns that same interior point, so the normal cannot be computed by dividing a zero delta. `SphereBoxFallbackNormal` instead chooses the nearest box face direction. This is an explicit degeneracy policy and should be tested alongside shallow/centered overlap.
+
+Triangle meshes have a separate *coordinate-space* problem. Mesh triangles and BVH acceleration nodes are indexed in collider-local space, while bodies and peer AABBs are usually in world space. [`WorldBoundsToColliderLocal`](../Narrowphase.cppm) transforms all eight corners of a world AABB with the inverse collider pose and expands a **conservative local AABB** for BVH queries. Passing untransformed world bounds to a local BVH would miss rotated/transformed geometry.
+
+After finding candidate triangle IDs, `MakeTriangleCollisionPrism` extrudes each triangle by `±SurfaceThickness/2` into a closed six-vertex convex prism. A finite convex peer can then use `CollideConvex` on this proxy; mesh-versus-mesh checks two sets of BVH candidates and can retain only the deepest representative contact. This is an **approximate thin-surface collision treatment**, not a continuous/deformable mesh solver. The triangle prism thickness changes when contacts may be reported; it is a simulation parameter, not just a visual appearance setting.
+
+The key call graph is therefore:
+
+```text
+Broadphase candidate pair
+    -> Narrowphase::CollidePair
+       -> box vs box: FindBoxBoxSAT -> BuildBoxBoxContacts
+       -> capsule/sphere vs box: closest witnesses + explicit normal fallback
+       -> convex vs convex: CollideConvex (GJK then EPA)
+       -> mesh vs convex: local BVH candidate query -> triangle prism -> CollideConvex
+       -> mesh vs mesh: two local BVH candidate queries -> prisms -> representative hit
+       -> plane: dedicated infinite-geometry branch
+    -> ContactManifold -> PhysicsWorld policy -> solver
+```
+
+**Exercises:** rotate one box until one edge-cross-product axis becomes necessary for separation; confirm `FindBoxBoxSAT` tests it. Place a sphere center exactly inside an OBB and inspect fallback normal and penetration depth. Rotate a triangle mesh collider and ensure local BVH queries still retrieve its candidate triangles. Compare physically meaningful contact density with the four-point manifold cap.
+
 ## 6. Raycasts and sphere-sweep distance are separate operations
 
 [`RaycastConvexHull`](../ConvexCollision.cppm) clips a ray against each outward face half-space. An entering face can increase the earliest hit distance, and an exiting face can decrease the latest allowed distance. If entry exceeds exit, no ray–polytope intersection remains. A nearly parallel ray outside a face fails immediately.
