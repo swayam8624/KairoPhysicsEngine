@@ -4,6 +4,10 @@
 
 ## How to use this guide
 
+For a narrative explanation of the complete simulation and its mathematical
+and spatial dependencies, read the [collision pipeline walkthrough](COLLISION_PIPELINE_WALKTHROUGH.md).
+It cross-links KairoMath, KairoPhysicsMath, KairoGeometry and KairoSpatial.
+
 Start with IDs and colliders; follow a time step through broadphase, narrowphase and constraint solving, then inspect high-level gameplay helpers and replay.
 
 Read each phase in order. Every link goes to a source file or directory in this repository. For a directory, inspect its public interface and then its implementation files. After each phase, identify the caller, the state it owns, the inputs it validates, and its observable outputs.
