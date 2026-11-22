@@ -787,6 +787,13 @@ export namespace kairo::foundation::physics
         /// World owns authoritative body/collider/joint arrays; its
         /// broadphase holds only spatial proxies. StepGuard protects against
         /// callback-driven recursive steps, even when exceptions occur.
+        // Fixed-step orchestrator: integrate forces and kinematics; update
+        // spatial proxies; shape-test pairs; apply collision response/event
+        // policy; wake and partition dynamic solver islands; warm-start,
+        // solve and cache impulses; correct positions; advance dynamic
+        // poses with CCD; sleep, clear forces and then notify listeners.
+        // Input: dt validated against PhysicsStepSettings; outputs mutate
+        // world state, contacts/events and the profiling snapshot.
         void Step(
             float dt)
         {
@@ -796,6 +803,9 @@ export namespace kairo::foundation::physics
             if (m_StepInProgress)
                 throw std::logic_error("PhysicsWorld::Step cannot be recursive.");
             m_StepInProgress = true;
+            // Callback/validation exceptions must not leave this world
+            // permanently marked as in-flight. RAII resets that flag
+            // even if contact policy code or a later stage throws.
             struct StepGuard final
             {
                 bool& Flag;
@@ -905,6 +915,10 @@ export namespace kairo::foundation::physics
         /// Output: number of fixed `Step` calls executed.
         /// Task: let applications feed variable frame times while the physics
         /// simulation advances in deterministic fixed-size increments.
+        // Frame-time adapter: run an integer number of fixedDt steps
+        // from accumulated elapsed time, capped by maxSubSteps. When
+        // badly overloaded, the remaining backlog is discarded:
+        // responsiveness wins over exact elapsed-time fidelity.
         std::uint32_t StepFixed(
             float elapsedTime,
             float fixedDt,
@@ -1297,6 +1311,10 @@ export namespace kairo::foundation::physics
 
         /// Replace deterministic simulation state only after the complete
         /// snapshot validates. Existing host callbacks survive restoration.
+        // Restore versioned simulation data, not just visible poses:
+        // validate IDs and references first, regenerate active collider
+        // metadata, then rebuild spatial proxies/islands and contact cache.
+        // Host callback function objects remain outside serialization.
         void RestoreSnapshot(const PhysicsWorldSnapshot& snapshot)
         {
             ValidateSnapshot(snapshot);
@@ -1361,6 +1379,9 @@ export namespace kairo::foundation::physics
         }
 
     private:
+        // Validate an externally supplied replay snapshot *before*
+        // writing any live world state: version, finite values, body and
+        // collider identities, joint references and contact cache limits.
         static void ValidateSnapshot(const PhysicsWorldSnapshot& snapshot)
         {
             if (snapshot.Version != PhysicsWorldSnapshotVersion)
@@ -1840,6 +1861,9 @@ export namespace kairo::foundation::physics
         }
 
         [[nodiscard]]
+        // Pair-specific override wins, followed by user callback,
+        // layer override and default collider response. Ignore removes
+        // contact, Trigger keeps events but not impulses, Block solves.
         CollisionResponse ResolveCollisionResponse(
             const Collider& colliderA,
             const Collider& colliderB) const
@@ -1870,6 +1894,9 @@ export namespace kairo::foundation::physics
             return DefaultCollisionResponse(colliderA, colliderB);
         }
 
+        // Shape collision is separate from collision *policy*.
+        // Filter ignored and joint-disabled pairs here, then set the
+        // final trigger/block mode before event identity and solving.
         void ApplyCollisionResponses()
         {
             std::vector<ContactManifold> filtered;
@@ -1907,6 +1934,9 @@ export namespace kairo::foundation::physics
             m_LastContacts = std::move(filtered);
         }
 
+        // Copy callback and events before calling client code so a
+        // listener can reconfigure subscriptions or mutate topology
+        // without invalidating the loop. Dispatch happens at Step end.
         void DispatchContactEvents()
         {
             if (!m_ContactEventCallback) return;
@@ -2654,6 +2684,9 @@ export namespace kairo::foundation::physics
             return std::nullopt;
         }
 
+        // Acceleration = gravity scale + force / mass, and angular
+        // acceleration = world inverse inertia * torque. Update only
+        // velocities here; positions must wait for constraint solving.
         void IntegrateForces(
             float dt)
         {
@@ -2681,6 +2714,9 @@ export namespace kairo::foundation::physics
             }
         }
 
+        // Kinematic movement follows externally supplied velocity:
+        // it participates in contacts but takes no dynamic impulse.
+        // Dynamic bodies can still react to a moving kinematic body.
         void IntegrateKinematicVelocities(
             float dt)
         {
@@ -2750,6 +2786,9 @@ export namespace kairo::foundation::physics
             return 0.0f;
         }
 
+        // At an estimated impact time, remove approaching normal
+        // relative speed by a mass-weighted impulse. This is a bounded
+        // linear collision response, not a globally exact 6-DOF CCD.
         void ApplyContinuousImpactImpulse(
             const ContinuousImpact& impact)
         {
@@ -2806,6 +2845,10 @@ export namespace kairo::foundation::physics
             }
         }
 
+        // Continuous bodies test swept candidates and clamp motion
+        // to an early TimeOfImpact with safety margins. Other dynamic
+        // bodies advance normally. Geometry coverage and TOI tolerances
+        // limit how strongly this can prevent tunneling.
         void IntegrateDynamicVelocitiesWithCCD(
             float dt)
         {
@@ -2984,6 +3027,9 @@ export namespace kairo::foundation::physics
             }
         }
 
+        // Forces/torques are one-step external inputs, cleared after
+        // integration. Constant gravity and persistent body settings
+        // live separately in world/body configuration.
         void ClearForceAccumulators() noexcept
         {
             for (RigidBody& body : m_Bodies)
@@ -3088,6 +3134,9 @@ export namespace kairo::foundation::physics
             };
         }
 
+        // Compare canonicalized last/current manifold keys to emit
+        // Begin, Stay and End transitions. The events are prepared
+        // before solving but published only after the completed step.
         void UpdateContactEvents()
         {
             std::vector<ContactEventKey> current;
@@ -3207,6 +3256,9 @@ export namespace kairo::foundation::physics
             ClampVelocity(body.State.AngularVelocity, body.MaxAngularSpeed);
         }
 
+        // Propagate an awake dynamic body's contact state to a sleeping
+        // dynamic peer where blocking contacts require solving.
+        // Trigger overlaps do not wake via constraint impulses.
         void WakeContactBodies()
         {
             for (const ContactManifold& manifold : m_LastContacts)
@@ -3252,6 +3304,9 @@ export namespace kairo::foundation::physics
             }
         }
 
+        // Sleep low-velocity dynamic bodies after a dwell interval;
+        // new force, fast motion or non-sleepable settings wake them.
+        // Sleeping is a solver optimization, not object destruction.
         void UpdateSleeping(
             float dt)
         {
@@ -3430,6 +3485,9 @@ export namespace kairo::foundation::physics
                 worldPoint - body.State.Position);
         }
 
+        // Compare cached pair IDs, body-local anchors and normal
+        // alignment; rehydrate scalar impulses only for compatible
+        // witnesses. A used[] bitmap prevents duplicate reuse.
         void RestoreContactCache()
         {
             std::vector<bool> used(m_ContactCache.size(), false);
@@ -3490,6 +3548,9 @@ export namespace kairo::foundation::physics
             }
         }
 
+        // Save nontrivial blocking-contact impulse multipliers for
+        // the next fixed step; skip triggers. Versioned physics replay
+        // can also carry the cache to maintain solver continuity.
         void StoreContactCache()
         {
             m_ContactCache.clear();
