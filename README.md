@@ -1,6 +1,8 @@
 # KairoPhysicsEngine
 
-**Learn from the implementation:** [Source reading order](docs/SOURCE_READING_ORDER.md). Follow the world-step call flow, then inspect tests before interpreting benchmark results.
+**Learn from the implementation:** [File-by-file reading order](docs/SOURCE_READING_ORDER.md) · [Full collision-to-solver walkthrough](docs/COLLISION_PIPELINE_WALKTHROUGH.md).
+
+Start with the source map, trace a complete `PhysicsWorld::Step` using the worked walkthrough, then inspect tests before interpreting performance claims.
 
 `KairoPhysicsEngine` is the rigid-body simulation layer in the Kairo foundation
 stack.
