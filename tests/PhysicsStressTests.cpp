@@ -13,6 +13,10 @@ using namespace kairo::foundation::math;
 
 namespace
 {
+    // TEACHING STRESS FIXTURE: 36 dynamic spheres over an infinite static
+    // plane, 360 fixed steps at 1/120 s, with sleeping disabled. Record
+    // finite per-stage timing and final positions. This tests repeatability
+    // under a bounded scene, not a throughput/scale performance claim.
     std::vector<Vec3f> RunDeterministicStressScene()
     {
         PhysicsWorld world;
@@ -64,6 +68,10 @@ namespace
     }
 }
 
+// TEACHING TEST: repeat the SAME initialized fixture and compare final
+// position components within absolute 1e-6. Different compiler FP flags,
+// island threading or hardware can change trajectories; this test alone
+// does not establish bitwise deterministic cross-platform replay.
 TEST_CASE("physics stress scene is stable and deterministic across repeated runs",
     "[PhysicsEngine][Scale][Determinism]")
 {
