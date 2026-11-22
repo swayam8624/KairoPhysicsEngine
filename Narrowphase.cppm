@@ -204,6 +204,12 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // A capsule is a sphere swept along a finite segment. First project
+    // the sphere center onto that segment, then compare center distance
+    // with the *sum* of the two radii. This yields the nearest axial
+    // contact, not a broadphase bounding-box approximation.
+    // normalFromCapsuleToSphere exists because CollidePair dispatches
+    // both collider orders but requires a consistent A->B normal.
     inline std::optional<ContactPoint> MakeCapsuleSphereContact(
         const CapsuleSegment& capsule,
         const Vec3f& sphereCenter,
@@ -231,6 +237,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // ClosestSegmentBoxPoints finds the relevant pair of surface/axis
+    // witnesses in the oriented box frame. A capsule contributes its
+    // radius after the segment query. The near-zero-distance fallback
+    // normal is an explicit degeneracy policy, not a measured direction.
     inline std::optional<ContactPoint> MakeCapsuleBoxContact(
         const CapsuleSegment& capsule,
         const OrientedBoxFrame& box,
@@ -289,6 +299,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Query a closest point on the oriented box, then handle the
+    // interior-center special case separately: a zero length delta
+    // cannot normalize to a useful contact direction. The bool argument
+    // flips A->B convention when shape order is sphere/box vs box/sphere.
     inline std::optional<ContactPoint> MakeSphereBoxContact(
         const Vec3f& sphereCenter,
         float sphereRadius,
@@ -348,6 +362,10 @@ export namespace kairo::foundation::physics
     // The minimum positive overlap gives a candidate response normal.
     // Parallel/near-degenerate cross axes are ignored to avoid unstable
     // normalization; tolerances here affect grazing-contact behavior.
+    // Separating-axis theorem: project both oriented half-box extents
+    // onto a candidate axis and compare their interval overlap.
+    // Any negative overlap *separates* the boxes, so return false.
+    // Positive overlap may improve the minimum-penetration normal.
     inline bool TestBoxAxis(
         const OrientedBoxFrame& boxA,
         const OrientedBoxFrame& boxB,
@@ -390,6 +408,11 @@ export namespace kairo::foundation::physics
     // For OBBs in 3D, test three face axes from each box plus
     // nine pairwise edge-cross axes: up to 15 candidate separating axes.
     // Even a positive SAT result still needs representative contact points.
+    // For two general oriented boxes, test 3 face normals from A,
+    // 3 from B and 9 pairwise edge-cross axes (at most 15 axes).
+    // Near-parallel cross products are skipped in TestBoxAxis.
+    // SAT proves overlap for ideal boxes; generating a stable limited
+    // contact manifold is separate work in BuildBoxBoxContacts.
     inline bool FindBoxBoxSAT(
         const OrientedBoxFrame& boxA,
         const OrientedBoxFrame& boxB,
@@ -472,6 +495,10 @@ export namespace kairo::foundation::physics
         return true;
     }
 
+    // Merge witnesses that are almost colocated and nearly collinear
+    // in normal, retaining the deepest. This removes duplicate contacts
+    // from adjacent box vertices/mesh triangles before iterative solve.
+    // Thresholds are heuristic numerical tolerances in world units.
     inline void AppendUniqueContact(
         std::vector<ContactPoint>& points,
         const ContactPoint& candidate)
@@ -496,6 +523,10 @@ export namespace kairo::foundation::physics
     // Keep the deepest contact first, then repeatedly prefer points
     // farthest from existing choices. This spreads a small manifold over
     // the patch for solver stability; it is not exact polygon clipping.
+    // The solver's contact budget is four points. Preserve the deepest
+    // first, then spread remaining witnesses over the patch by a
+    // farthest-point heuristic. The result is deterministic under the
+    // same candidate iteration order, but not exact polygon clipping.
     inline void ReduceContactPoints(
         std::vector<ContactPoint>& points,
         std::size_t maxPoints = 4u)
@@ -557,6 +588,11 @@ export namespace kairo::foundation::physics
         points = std::move(reduced);
     }
 
+    // Given SAT's normal/penetration, collect vertices from A inside B
+    // and from B inside A, estimate a representative surface position,
+    // deduplicate, and reduce to a solver-friendly manifold.
+    // An edge-edge overlap may require a fallback contact even when
+    // neither box contributes an interior vertex.
     inline void BuildBoxBoxContacts(
         ContactManifold& manifold,
         const OrientedBoxFrame& boxA,
@@ -608,6 +644,10 @@ export namespace kairo::foundation::physics
         ReduceContactPoints(manifold.Points, 4u);
     }
 
+    // A plane is unbounded and therefore has no broadphase tree AABB.
+    // For every penetrating box vertex, use signed plane distance to
+    // create a witness. Collider-order dispatch must orient the normal
+    // consistently so impulse signs in ContactSolver remain correct.
     inline void BuildBoxPlaneContacts(
         ContactManifold& manifold,
         const OrientedBoxFrame& box,
@@ -706,6 +746,12 @@ export namespace kairo::foundation::physics
     // individual triangle prisms are checked with convex penetration and
     // only the deepest candidate is retained. This is an approximation,
     // not an exhaustive triangle/triangle contact manifold.
+    // Both mesh acceleration structures are queried conservatively;
+    // candidate triangles are converted to thin convex prisms for
+    // penetration tests. This selects a deepest representative hit,
+    // not an exhaustive manifold over all intersecting mesh triangles.
+    // Never interpret this approximate mesh path as arbitrary deformable
+    // self-collision or a watertight continuous collision oracle.
     inline std::optional<ContactManifold> CollideTriangleMeshes(
         const RigidBody& bodyA,
         const Collider& colliderA,
@@ -770,6 +816,10 @@ export namespace kairo::foundation::physics
     // Mesh/convex path: transform peer bounds into mesh-local space for
     // BVH traversal; collision prisms approximate candidate triangles.
     // Check the peer-shape policy below before adding new collider types.
+    // Transform the convex peer's world AABB into the mesh collider's
+    // *local* frame before BVH traversal. Triangle indices refer to
+    // stored local mesh primitives; the convex-penetration primitive
+    // adapter converts candidates into consistent pair-space witnesses.
     inline std::optional<ContactManifold> CollideTriangleMesh(
         const RigidBody& meshBody,
         const Collider& meshCollider,
@@ -812,6 +862,13 @@ export namespace kairo::foundation::physics
     /// Task: dispatch shape-specific contact tests after broadphase candidate
     /// pairing; mesh prism and reduced-manifold paths are approximations.
     [[nodiscard]]
+    // Central shape-dispatch boundary. A positive broadphase pair
+    // enters here and may still produce no manifold. Cases include
+    // sphere, box, capsule, plane, convex and supported mesh peers;
+    // reversed shape order must reverse contact normals to preserve
+    // the solver's bodyA -> bodyB sign convention.
+    // The trigger flag records *non-impulsive* contact intent; world
+    // pair/layer/callback response policy may override it later.
     inline std::optional<ContactManifold> CollidePair(
         const RigidBody& bodyA,
         const Collider& colliderA,
@@ -1337,6 +1394,11 @@ export namespace kairo::foundation::physics
     // for the supplied collider vector (the .at calls will throw otherwise).
     // Recheck liveness and body ownership since a candidate isn't a contact.
     // Empty optional/point sets are not forwarded to the iterative solver.
+    // Convert the deduplicated broadphase pair list into real,
+    // shape-tested manifolds. Recheck active collider/body ownership,
+    // because tree candidates are caches and can contain noncontacts.
+    // PhysicsWorld then resolves Ignore/Trigger/Block policy *before*
+    // warm starting, solving, or publishing contact events.
     inline std::vector<ContactManifold> ComputeContacts(
         const std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders,
