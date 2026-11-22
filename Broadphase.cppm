@@ -79,6 +79,10 @@ export namespace kairo::foundation::physics
 
         /// TEACHING METHOD: Creates or updates finite DynamicAABBTree proxies and handles infinite colliders separately; inactive collider state removes proxies.
 
+        // Sync the collider's current world bounds into a DynamicAABBTree *cache*, not
+        // the authoritative geometry. Infinite planes use a separate list; when
+        // filters/category change a prior tree handle must be recreated, not retained
+        // under wrong metadata.
         void AddOrUpdateCollider(
             const std::vector<RigidBody>& bodies,
             const Collider& collider)
@@ -157,6 +161,9 @@ export namespace kairo::foundation::physics
         // Remove only indexing state. Collider and body arrays remain
         // owned by PhysicsWorld; a removed/disabled collider may occupy
         // its old ID slot in that authoritative array.
+        // Remove an expired collider from the finite proxy tree or infinite list and
+        // mark its proxy metadata inactive. This does not delete the owner RigidBody
+        // or shift stable ColliderID array indices.
         void RemoveCollider(
             ColliderID collider)
         {
@@ -183,6 +190,9 @@ export namespace kairo::foundation::physics
         // PhysicsWorld's array to retain inactive ID slots; it does not
         // independently discover IDs erased from a shrunken array.
         // Query helpers must call/ensure Sync after transform changes.
+        // Reconcile authoritative bodies/colliders with spatial proxy state before
+        // querying. A stale tree would miss moved shapes even if collision math in
+        // Narrowphase remains exact.
         void Sync(
             const std::vector<RigidBody>& bodies,
             const std::vector<Collider>& colliders)
@@ -196,6 +206,10 @@ export namespace kairo::foundation::physics
         /// TEACHING METHOD: Produces deduplicated candidates from dynamic-tree overlap and finite/infinite combinations. Narrowphase still tests contact geometry.
 
         [[nodiscard]]
+        // Enumerate only broad candidate pairs: dynamic tree overlaps among finite
+        // shapes plus pairings against infinite colliders. ShouldPair filters
+        // inactive/same-body and category masks; sort canonical IDs to make solver
+        // input deterministic.
         std::vector<BroadphasePair> ComputePairs(
             const std::vector<RigidBody>& bodies,
             const std::vector<Collider>& colliders) const
@@ -288,6 +302,9 @@ export namespace kairo::foundation::physics
         // Used by swept-volume/scene queries that must see *planes*
         // as well as finite tree hits. QueryAABB intentionally omits
         // planes; it is only a finite-tree query.
+        // Return candidate ColliderIDs whose broadphase proxies could intersect the
+        // query AABB. PhysicsWorld's true shape query must still test geometry because
+        // AABB overlap alone can contain false positives.
         std::vector<ColliderID> QueryAABBCandidates(
             const spatial::SpatialAABB& query,
             std::uint32_t layerMask) const
@@ -388,6 +405,10 @@ export namespace kairo::foundation::physics
         // A passed filter is not a promise of contact, blocking response,
         // or solver participation. In particular, trigger/event policy and
         // collision-response overrides live above this cache in PhysicsWorld.
+        // This gate checks live body/collider ownership and mutual collision-category
+        // masks; the PhysicsWorld response resolver later decides Ignore, Trigger or
+        // Block after shape contact exists. Avoid folding gameplay policy into spatial
+        // index ownership.
         static bool ShouldPair(
             ColliderID a,
             ColliderID b,
