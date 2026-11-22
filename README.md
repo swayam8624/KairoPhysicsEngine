@@ -1,5 +1,7 @@
 # KairoPhysicsEngine
 
+**Learn from the implementation:** [Source reading order](docs/SOURCE_READING_ORDER.md). Follow the world-step call flow, then inspect tests before interpreting benchmark results.
+
 `KairoPhysicsEngine` is the rigid-body simulation layer in the Kairo foundation
 stack.
 
@@ -9,13 +11,14 @@ KairoMath -> KairoPhysicsMath -> KairoGeometry -> KairoSpatial -> KairoPhysicsEn
 
 It owns body/collider/joint storage, broadphase, narrowphase, island partitioning,
 contact and constraint solving, fixed stepping, debug extraction, scene queries,
-contact events, and sandbox tooling. It is still not the final game runtime,
-editor, or character controller package.
+contact events, and sandbox tooling. It is not the final game runtime or editor. It does include a
+character-controller module; that module is not a complete gameplay framework.
 
 ## Quickstart
 
 ```bash
-cd /Users/swayamsingal/Desktop/Programming/Kairo/Foundation/KairoPhysicsEngine
+git clone https://github.com/swayam8624/KairoPhysicsEngine.git
+cd KairoPhysicsEngine
 cmake -S . -B build -G Ninja -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++
 cmake --build build
 ctest --test-dir build --output-on-failure
