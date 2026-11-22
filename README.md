@@ -1,6 +1,6 @@
 # KairoPhysicsEngine
 
-**Learn from the implementation:** [File-by-file reading order](docs/SOURCE_READING_ORDER.md) · [Full collision-to-solver walkthrough](docs/COLLISION_PIPELINE_WALKTHROUGH.md).
+**Learn from the implementation:** [File-by-file reading order](docs/SOURCE_READING_ORDER.md) · [Full collision-to-solver walkthrough](docs/COLLISION_PIPELINE_WALKTHROUGH.md) · [Contact-impulse mathematical derivation and worked tests](docs/CONTACT_SOLVER_FROM_EQUATIONS_TO_CODE.md).
 
 Start with the source map, trace a complete `PhysicsWorld::Step` using the worked walkthrough, then inspect tests before interpreting performance claims.
 
