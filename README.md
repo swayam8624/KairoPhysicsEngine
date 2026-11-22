@@ -1,6 +1,6 @@
 # KairoPhysicsEngine
 
-**Learn from the implementation:** [File-by-file reading order](docs/SOURCE_READING_ORDER.md) · [Full collision-to-solver walkthrough](docs/COLLISION_PIPELINE_WALKTHROUGH.md) · [Contact-impulse mathematical derivation and worked tests](docs/CONTACT_SOLVER_FROM_EQUATIONS_TO_CODE.md) · [Body/collider lifetime, contact events, snapshots and CCD worked lab](docs/BODY_CONTACT_EVENT_AND_CCD_LIFECYCLE_LAB.md).
+**Learn from the implementation:** [File-by-file reading order](docs/SOURCE_READING_ORDER.md) · [Full collision-to-solver walkthrough](docs/COLLISION_PIPELINE_WALKTHROUGH.md) · [Contact-impulse mathematical derivation and worked tests](docs/CONTACT_SOLVER_FROM_EQUATIONS_TO_CODE.md) · [Body/collider lifetime, contact events, snapshots and CCD worked lab](docs/BODY_CONTACT_EVENT_AND_CCD_LIFECYCLE_LAB.md) · [GJK/EPA convex penetration, finite support maps and deterministic replay](docs/CONVEX_COLLISION_AND_REPLAY_FROM_FIRST_PRINCIPLES.md).
 
 Start with the source map, trace a complete `PhysicsWorld::Step` using the worked walkthrough, then inspect tests before interpreting performance claims.
 
