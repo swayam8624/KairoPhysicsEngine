@@ -46,6 +46,10 @@ export namespace kairo::foundation::physics
     // are persisted by PhysicsWorld's contact cache between fixed steps.
     // World policy has already marked Ignore/Trigger/Block, so trigger
     // manifolds are valid events but must produce *no* physical impulse.
+    // One velocity-iteration update for a contact manifold. Solve per point using
+    // relative point velocity, rotational effective mass, restitution and
+    // Baumgarte stabilization; cache accumulated impulses for the next step.
+    // Trigger manifolds generate events only, not response.
     inline void SolveContactManifold(
         std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders,
@@ -144,6 +148,10 @@ export namespace kairo::foundation::physics
             // (mA^-1 + mB^-1) + rotational leverage about the normal.
             // It converts desired relative normal velocity change into
             // an impulse magnitude; near-zero means no solvable motion.
+            // Effective inverse contact mass includes both inverse *linear* masses and the
+            // rotational leverage of the contact point. A centered collision and an
+            // off-center hit cannot use the same impulse scalar unless their inertia terms
+            // coincide.
             const float denominator =
                 ContactNormalDenominator(
                     bodyA.Mass.InverseMass,
@@ -196,6 +204,9 @@ export namespace kairo::foundation::physics
             // and apply the *difference* to each body. This is a
             // unilateral complementarity constraint: contact may push
             // bodies apart but must not glue them together.
+            // Project the cumulative normal impulse onto [0,+infinity), then apply just
+            // the change. A unilateral contact pushes overlapping bodies apart but cannot
+            // exert a pulling impulse, and the accumulator is reusable for warm start.
             const float normalImpulseDelta =
                 ClampAccumulatedImpulseDelta(
                     point.NormalImpulse,
@@ -209,6 +220,9 @@ export namespace kairo::foundation::physics
             // change also skips this point's tangent/friction solve.
             // A more general friction iteration could solve tangential
             // velocity even when the normal accumulator is unchanged.
+            // This implementation exits the point's solve when the normal delta is tiny,
+            // so its tangential/friction correction is also skipped in that iteration.
+            // That coupling is an explicit limitation to test on resting sliding bodies.
             if (std::abs(normalImpulseDelta) <= 1.0e-8f)
             {
                 continue;
@@ -320,6 +334,10 @@ export namespace kairo::foundation::physics
     // Reapply last step's solution before iterative solve to improve
     // rest/stack convergence. The cached tangent is a scalar only;
     // rotating sliding directions across steps is an accuracy limit.
+    // Use last-frame matched manifold impulse magnitudes to precondition this
+    // frame's body velocities before iterative solving. Tangent direction is
+    // reconstructed from current relative velocity; a cached scalar alone does not
+    // preserve a persistent 2D friction basis.
     inline void WarmStartContacts(
         std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders,
@@ -453,6 +471,10 @@ export namespace kairo::foundation::physics
     // distributes a bounded correction by inverse mass; a static
     // body stays fixed while the dynamic body takes the displacement.
     // PhysicsWorld generally invokes the island-aware correction.
+    // The standalone positional correction distributes residual penetration by
+    // inverse mass across a bounded number of iterations. Static/kinematic inverse
+    // mass zero protects immovable bodies; position correction cannot undo missed
+    // time-of-impact events.
     inline void CorrectPositions(
         std::vector<RigidBody>& bodies,
         const std::vector<ContactManifold>& contacts,
