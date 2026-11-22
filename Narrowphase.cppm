@@ -1,3 +1,19 @@
+// TEACHING MAP: Convert BroadphasePair (possibly overlapping *bounds*)
+// into shape-tested ContactManifold data for PhysicsWorld and ContactSolver.
+// Geometry/AABB provides primitive math; Spatial/BVHTraversal narrows triangle
+// mesh work; ConvexCollision supplies convex penetration queries.
+//
+// Coordinate invariants matter: normal direction must agree with manifold
+// body A -> B ordering, penetration depth is nonnegative, and collider IDs
+// identify the exact shape on possibly multi-collider bodies. Swapping shapes
+// therefore requires reversing normals where a reversed query is reused.
+//
+// Numerical policy is shape-specific: box SAT uses face and cross-edge axes,
+// degenerate axes are skipped; closest-point routines clamp finite segments;
+// triangle meshes query a BVH and use thin convex prisms for candidates.
+// These approximations should not be described as globally exact contact
+// geometry. Compare PhysicsEngineTests and PhysicsStressTests before relying
+// on edge/deep-overlap behavior or treating timings as correctness evidence.
 module;
 
 #include <algorithm>
@@ -36,6 +52,9 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // For any (preferably unit) axis, project each OBB half-axis onto it.
+    // Sum of absolute projections gives the support radius used by SAT;
+    // box center separation then determines overlap on that axis.
     inline float ProjectBoxRadius(
         const OrientedBoxFrame& box,
         const Vec3f& axis)
@@ -92,6 +111,9 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Projection parameter t = dot(p-a,b-a)/|b-a|^2 is clamped to [0,1].
+    // The length-squared guard treats a collapsed segment as its endpoint;
+    // this is used by capsule/collision helper paths.
     inline Vec3f ClosestPointOnSegment(
         const Vec3f& a,
         const Vec3f& b,
@@ -322,6 +344,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // SAT: if either OBB separates along one axis, there is no overlap.
+    // The minimum positive overlap gives a candidate response normal.
+    // Parallel/near-degenerate cross axes are ignored to avoid unstable
+    // normalization; tolerances here affect grazing-contact behavior.
     inline bool TestBoxAxis(
         const OrientedBoxFrame& boxA,
         const OrientedBoxFrame& boxB,
@@ -361,6 +387,9 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // For OBBs in 3D, test three face axes from each box plus
+    // nine pairwise edge-cross axes: up to 15 candidate separating axes.
+    // Even a positive SAT result still needs representative contact points.
     inline bool FindBoxBoxSAT(
         const OrientedBoxFrame& boxA,
         const OrientedBoxFrame& boxB,
@@ -464,6 +493,9 @@ export namespace kairo::foundation::physics
         points.push_back(candidate);
     }
 
+    // Keep the deepest contact first, then repeatedly prefer points
+    // farthest from existing choices. This spreads a small manifold over
+    // the patch for solver stability; it is not exact polygon clipping.
     inline void ReduceContactPoints(
         std::vector<ContactPoint>& points,
         std::size_t maxPoints = 4u)
@@ -670,6 +702,10 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Broad triangle mesh/mesh path: BVH AABB queries supply triangle IDs;
+    // individual triangle prisms are checked with convex penetration and
+    // only the deepest candidate is retained. This is an approximation,
+    // not an exhaustive triangle/triangle contact manifold.
     inline std::optional<ContactManifold> CollideTriangleMeshes(
         const RigidBody& bodyA,
         const Collider& colliderA,
@@ -731,6 +767,9 @@ export namespace kairo::foundation::physics
     }
 
     [[nodiscard]]
+    // Mesh/convex path: transform peer bounds into mesh-local space for
+    // BVH traversal; collision prisms approximate candidate triangles.
+    // Check the peer-shape policy below before adding new collider types.
     inline std::optional<ContactManifold> CollideTriangleMesh(
         const RigidBody& meshBody,
         const Collider& meshCollider,
@@ -770,7 +809,8 @@ export namespace kairo::foundation::physics
 
     /// Input: two colliders and their owning bodies.
     /// Output: contact manifold when the shapes overlap.
-    /// Task: perform exact V1 collision tests after broadphase candidate pairing.
+    /// Task: dispatch shape-specific contact tests after broadphase candidate
+    /// pairing; mesh prism and reduced-manifold paths are approximations.
     [[nodiscard]]
     inline std::optional<ContactManifold> CollidePair(
         const RigidBody& bodyA,
@@ -1293,6 +1333,10 @@ export namespace kairo::foundation::physics
     /// Output: all exact contact manifolds.
     /// Task: convert candidate pairs into solver-ready contact data.
     [[nodiscard]]
+    // Pair indices were produced by BroadphaseWorld and are assumed valid
+    // for the supplied collider vector (the .at calls will throw otherwise).
+    // Recheck liveness and body ownership since a candidate isn't a contact.
+    // Empty optional/point sets are not forwarded to the iterative solver.
     inline std::vector<ContactManifold> ComputeContacts(
         const std::vector<RigidBody>& bodies,
         const std::vector<Collider>& colliders,
