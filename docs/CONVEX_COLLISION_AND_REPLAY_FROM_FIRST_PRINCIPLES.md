@@ -1,5 +1,7 @@
 # From support points to reproducible contacts — a KairoPhysicsEngine C++23 laboratory
 
+**Companion on versioned world state:** [Snapshot file format, state ownership and strong restore safety](PHYSICS_SNAPSHOT_FORMAT_AND_RECOVERY_LAB.md) — read this after the replay sections to trace the actual snapshot serializer and file-recovery path.
+
 This chapter continues [the physics reading order](SOURCE_READING_ORDER.md), [the full collision pipeline](COLLISION_PIPELINE_WALKTHROUGH.md), [the equations-to-contact-solver guide](CONTACT_SOLVER_FROM_EQUATIONS_TO_CODE.md), and [body/contact lifecycle](BODY_CONTACT_EVENT_AND_CCD_LIFECYCLE_LAB.md). It specifically traces two previously under-explained first-party modules:
 
 - [`ConvexCollision.cppm`](../ConvexCollision.cppm): shape support maps, Minkowski difference, GJK simplex geometry, EPA penetration, convex hull ray/distance queries
