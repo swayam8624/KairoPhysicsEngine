@@ -11,6 +11,11 @@ module;
 #include <variant>
 #include <vector>
 
+// TEACHING REPLAY: record initial PhysicsWorldSnapshot, an ordered list of
+// external commands per fixed step, and expected post-step state hashes.
+// PhysicsSerialization owns the snapshot wire format. This module owns
+// replay commands/frames and their versioned binary encoding; it does not
+// serialize host callbacks, timers or a generic gameplay input stream.
 export module Kairo.Foundation.PhysicsEngine.Replay;
 
 import Kairo.Foundation.Math.Vector;
@@ -32,9 +37,15 @@ export namespace kairo::foundation::physics
     struct ReplayWakeBody final { BodyID Body = InvalidBodyID; };
     struct ReplaySetCCD final { BodyID Body = InvalidBodyID; CollisionDetectionMode Mode = CollisionDetectionMode::Discrete; };
 
+    // Commands intentionally cover a bounded set of public world mutations.
+    // Adding a new variant requires BOTH writeCommand/readCommand tag updates,
+    // plus a versioning decision for old files and recorded replays.
     using PhysicsReplayCommand = std::variant<ReplayAddForce, ReplayAddTorque,
         ReplayImpulseAtPoint, ReplaySetMotionState, ReplayWakeBody, ReplaySetCCD>;
 
+    // Replay commands execute immediately BEFORE world.Step(fixedDt).
+    // ExpectedStateHash is calculated AFTER the step; frame indices are
+    // zero-based when reporting the first divergence.
     struct PhysicsReplayFrame final
     {
         std::vector<PhysicsReplayCommand> Commands;
@@ -58,6 +69,10 @@ export namespace kairo::foundation::physics
         std::uint64_t ActualHash = 0u;
     };
 
+    // Dispatch one variant through PhysicsWorld's typed API. Most world
+    // methods validate body/shape state themselves; explicit motion-state
+    // assignment separately rejects invalid IDs and nonfinite components.
+    // Commands alter authoritative state, not only renderer-visible poses.
     inline void ApplyPhysicsReplayCommand(PhysicsWorld& world, const PhysicsReplayCommand& command)
     {
         std::visit([&](const auto& value)
@@ -93,6 +108,9 @@ export namespace kairo::foundation::physics
     class PhysicsReplayRecorder final
     {
     public:
+        // Freeze the complete deterministic initial world state and the
+        // positive simulation dt; subsequent Step records only external
+        // command stream plus expected post-step hash.
         PhysicsReplayRecorder(const PhysicsWorld& world, float fixedDt)
         {
             RequirePositive(fixedDt, "PhysicsReplayRecorder.fixedDt");
@@ -100,6 +118,9 @@ export namespace kairo::foundation::physics
             m_Replay.InitialState = world.CaptureSnapshot();
         }
 
+        // Apply the ordered commands, take one physics fixed step, then
+        // hash the resulting state. A recorder should only be used with a
+        // world that continues from its captured initial snapshot.
         void Step(PhysicsWorld& world, std::vector<PhysicsReplayCommand> commands = {})
         {
             for (const auto& command : commands) ApplyPhysicsReplayCommand(world, command);
@@ -113,6 +134,11 @@ export namespace kairo::foundation::physics
         PhysicsReplay m_Replay;
     };
 
+    // Restore replay initial state, execute each frame's command list and
+    // fixed Step, compare recorded-versus-replayed PhysicsStateHash, then
+    // stop at the FIRST divergent zero-based frame with both hash values.
+    // Matching hashes are a regression signal, not a proof of exact physics
+    // across different FP compilers, CPU architectures or parallel schedules.
     [[nodiscard]] inline PhysicsReplayVerification VerifyPhysicsReplay(
         const PhysicsReplay& replay, PhysicsWorld& world)
     {
@@ -147,6 +173,10 @@ export namespace kairo::foundation::physics
         inline constexpr std::uint32_t MaxFrames = 1'000'000u;
         inline constexpr std::uint32_t MaxCommandsPerFrame = 1'000'000u;
 
+        // Little-endian byte encoding for integers; floats are serialized by
+        // IEEE-like 32-bit bit_cast payloads. Embedded snapshot and replay
+        // share an overall declared file budget; inspect individual writer
+        // helpers for allocation and final-size bounds.
         struct Writer final
         {
             std::vector<std::uint8_t> b;
@@ -162,6 +192,9 @@ export namespace kairo::foundation::physics
             void count(std::size_t n,std::uint32_t max)
             {if(n>max||n>std::numeric_limits<std::uint32_t>::max())throw std::length_error("Replay count too large.");u32(static_cast<std::uint32_t>(n));}
         };
+        // Checked byte cursor: req() guards truncated reads before offsets
+        // advance. Counts have explicit caps; unknown command tags, wrong
+        // header/version and trailing bytes are rejected during decoding.
         struct Reader final
         {
             const std::vector<std::uint8_t>& b; std::size_t o=0;
@@ -179,6 +212,9 @@ export namespace kairo::foundation::physics
         };
         inline void writeState(Writer& w,const MotionState& s){w.v3(s.Position);w.q(s.Rotation);w.v3(s.LinearVelocity);w.v3(s.AngularVelocity);}
         inline MotionState readState(Reader& r){return{r.v3(),r.q(),r.v3(),r.v3()};}
+        // Stable tag encoding (0 force, 1 torque, 2 point impulse, 3 motion
+        // state, 4 wake, 5 collision-detection mode). Keep synchronized with
+        // readCommand, and bump replay version when the wire contract changes.
         inline void writeCommand(Writer& w,const PhysicsReplayCommand& c)
         {
             std::visit([&](const auto& x){using T=std::decay_t<decltype(x)>;
@@ -190,6 +226,8 @@ export namespace kairo::foundation::physics
                 else if constexpr(std::is_same_v<T,ReplaySetCCD>){w.u8(5);w.u32(x.Body);w.u8(x.Mode==CollisionDetectionMode::Continuous?1u:0u);}
             },c);
         }
+        // Decode exactly the same tags and component order that writeCommand
+        // emitted. Invalid mode/tag is a hard error, not a default action.
         inline PhysicsReplayCommand readCommand(Reader& r)
         {
             switch(r.u8()){
@@ -201,12 +239,21 @@ export namespace kairo::foundation::physics
             case 5:{auto b=r.u32();auto m=r.u8();if(m>1)throw std::runtime_error("Replay CCD mode invalid.");return ReplaySetCCD{b,m?CollisionDetectionMode::Continuous:CollisionDetectionMode::Discrete};}
             default:throw std::runtime_error("Replay command tag is invalid.");}
         }
+        // Reject overbudget replay size before allocating the input buffer;
+        // binary read failures propagate rather than returning partial data.
         inline std::vector<std::uint8_t> readFile(const std::filesystem::path& p)
         {std::error_code ec;auto n=std::filesystem::file_size(p,ec);if(ec)throw std::runtime_error("Failed to stat replay file.");if(n>MaxBytes)throw std::length_error("Replay file too large.");std::ifstream in(p,std::ios::binary);if(!in)throw std::runtime_error("Failed to open replay file.");std::vector<std::uint8_t>x(static_cast<std::size_t>(n));if(!x.empty())in.read(reinterpret_cast<char*>(x.data()),static_cast<std::streamsize>(x.size()));if(!in&&!x.empty())throw std::runtime_error("Failed while reading replay file.");return x;}
+        // Stage in .tmp, rename previous destination to .bak, publish new
+        // file then remove backup. A rename error attempts rollback; this
+        // is not a guarantee of durable fsync or crash consistency on every
+        // filesystem, and stranded .tmp/.bak files remain test cases.
         inline void writeFile(const std::filesystem::path&p,const std::vector<std::uint8_t>&x)
         {auto t=std::filesystem::path(p.string()+".tmp");std::error_code ec;std::filesystem::remove(t,ec);std::ofstream out(t,std::ios::binary|std::ios::trunc);if(!out)throw std::runtime_error("Failed to create replay temp file.");if(!x.empty())out.write(reinterpret_cast<const char*>(x.data()),static_cast<std::streamsize>(x.size()));out.flush();if(!out)throw std::runtime_error("Failed while writing replay file.");out.close();auto bak=std::filesystem::path(p.string()+".bak");std::filesystem::remove(bak,ec);bool old=std::filesystem::exists(p);if(old){std::filesystem::rename(p,bak,ec);if(ec)throw std::runtime_error("Failed to stage old replay file.");}std::filesystem::rename(t,p,ec);if(ec){if(old){std::error_code xec;std::filesystem::rename(bak,p,xec);}throw std::runtime_error("Failed to publish replay file.");}if(old)std::filesystem::remove(bak,ec);}
     }
 
+    // Write magic + version + fixed dt + length-prefixed serialized world
+    // snapshot + capped frame/command counts + post-step hashes. The state
+    // snapshot is delegated to PhysicsSerialization, not rebuilt here.
     [[nodiscard]] inline std::vector<std::uint8_t> SerializePhysicsReplay(const PhysicsReplay& replay)
     {
         using namespace replay_detail;
@@ -217,12 +264,19 @@ export namespace kairo::foundation::physics
         w.count(replay.Frames.size(),MaxFrames);
         for(const auto&frame:replay.Frames){w.count(frame.Commands.size(),MaxCommandsPerFrame);for(const auto&c:frame.Commands)writeCommand(w,c);w.u64(frame.ExpectedStateHash);}return std::move(w.b);
     }
+    // Require versioned magic and exact payload exhaustion. Decode initial
+    // PhysicsWorldSnapshot first; each frame then reconstructs typed commands
+    // and one expected hash. Extra bytes invalidate the record.
     [[nodiscard]] inline PhysicsReplay DeserializePhysicsReplay(const std::vector<std::uint8_t>& bytes)
     {
         using namespace replay_detail;if(bytes.size()>MaxBytes)throw std::length_error("Replay buffer too large.");Reader r(bytes);r.magic();if(r.u32()!=PhysicsReplayVersion)throw std::runtime_error("Replay file version unsupported.");PhysicsReplay replay;replay.FixedDt=r.f();auto n=r.count(static_cast<std::uint32_t>(MaxBytes));replay.InitialState=DeserializePhysicsWorldSnapshot(r.bytes(n));auto frames=r.count(MaxFrames);replay.Frames.reserve(frames);for(std::uint32_t i=0;i<frames;++i){PhysicsReplayFrame f;auto commands=r.count(MaxCommandsPerFrame);f.Commands.reserve(commands);for(std::uint32_t j=0;j<commands;++j)f.Commands.push_back(readCommand(r));f.ExpectedStateHash=r.u64();replay.Frames.push_back(std::move(f));}r.end();return replay;
     }
+    // Persist the serialized command stream with the staged writer above;
+    // do not equate successful write with actual replay verification.
     inline void SavePhysicsReplay(const std::filesystem::path& path,const PhysicsReplay& replay)
     {replay_detail::writeFile(path,SerializePhysicsReplay(replay));}
+    // Read bounded bytes and decode the exact replay version; then call
+    // VerifyPhysicsReplay against a world to detect execution divergence.
     [[nodiscard]] inline PhysicsReplay LoadPhysicsReplay(const std::filesystem::path& path)
     {return DeserializePhysicsReplay(replay_detail::readFile(path));}
 }
