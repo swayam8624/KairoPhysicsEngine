@@ -12,6 +12,8 @@ It cross-links KairoMath, KairoPhysicsMath, KairoGeometry and KairoSpatial.
 
 **Study convex geometry and replay:** [Support maps, GJK/EPA, witness reconstruction and versioned frame-by-frame verification](CONVEX_COLLISION_AND_REPLAY_FROM_FIRST_PRINCIPLES.md). Includes the hand-checkable cube/sphere collision and real Catch2 cases.
 
+**Joints and solver stability:** [Joint constraint mathematics, degrees of freedom, stability and parallel islands](JOINT_CONSTRAINTS_LAB.md). Follow local anchors into Jacobian rows, pose correction, island union–find, and the six existing Catch2 tests.
+
 **Solve the mathematics while reading:** [Contact impulses, friction, warm starts and solver islands](CONTACT_SOLVER_FROM_EQUATIONS_TO_CODE.md) includes a worked two-mass collision and regression exercises.
 
 Start with IDs and colliders; follow a time step through broadphase, narrowphase and constraint solving, then inspect high-level gameplay helpers and replay.
